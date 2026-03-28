@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -53,6 +54,7 @@ logs.txt
 *.tmp
 *.bak
 *.cache
+.pytest_cache/
 
 browser_data
 browser_data_rt
