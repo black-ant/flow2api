@@ -1,18 +1,22 @@
 version: '3.8'
 
 services:
-  flow2api:
+  flow2api-headed:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: flow2api:local
-    container_name: flow2api
+      dockerfile: Dockerfile.headed
+    image: flow2api:headed
+    container_name: flow2api-headed
     ports:
-      - "38000:8000"
+      - "8000:8000"
     volumes:
       - ./data:/app/data
       - ./tmp:/app/tmp
       - ./config/setting.toml:/app/config/setting.toml
     environment:
       - PYTHONUNBUFFERED=1
+      - ALLOW_DOCKER_HEADED_CAPTCHA=true
+      - DISPLAY=:99
+      - XVFB_WHD=1920x1080x24
+    shm_size: "2gb"
     restart: unless-stopped

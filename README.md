@@ -22,6 +22,8 @@
 - 🌐 **代理支持** - 支持 HTTP/SOCKS5 代理
 - 📱 **Web 管理界面** - 直观的 Token 和配置管理
 - 🎨 **图片生成连续对话**
+- 🧩 **Gemini 官方请求体兼容** - 支持 `generateContent` / `streamGenerateContent`、`systemInstruction`、`contents.parts.text/inlineData/fileData`
+- ✅ **Gemini 官方格式已实测出图** - 已使用真实 Token 验证 `/models/{model}:generateContent` 可正常返回官方 `candidates[].content.parts[].inlineData`
 
 ## 🚀 快速开始
 
@@ -32,6 +34,8 @@
 
 - 由于Flow增加了额外的验证码，你可以自行选择使用浏览器打码或第三发打码：
 注册[YesCaptcha](https://yescaptcha.com/i/13Xd8K)并获取api key，将其填入系统配置页面```YesCaptcha API密钥```区域
+- 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/capmonster/ezcaptcha/capsolver）。
+如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
 
 - 自动更新st浏览器拓展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
 
@@ -51,6 +55,8 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
+> 说明：Compose 已默认挂载 `./tmp:/app/tmp`。如果把缓存超时设为 `0`，语义是“不自动过期删除”；若希望容器重建后仍保留缓存文件，也需要保留这个 `tmp` 挂载。
+
 #### WARP 模式（使用代理）
 
 ```bash
@@ -61,12 +67,29 @@ docker-compose -f docker-compose.warp.yml up -d
 docker-compose -f docker-compose.warp.yml logs -f
 ```
 
+#### Docker 有头打码模式（browser / personal）
+
+> 适用于你有虚拟化桌面需求、希望在容器里启用有头浏览器打码的场景。  
+> 该模式默认启动 `Xvfb + Fluxbox` 实现容器内部可视化，并设置 `ALLOW_DOCKER_HEADED_CAPTCHA=true`。  
+> 仅开放应用端口，不提供任何远程桌面连接端口。
+
+```bash
+# 启动有头模式（首次建议带 --build）
+docker compose -f docker-compose.headed.yml up -d --build
+
+# 查看日志
+docker compose -f docker-compose.headed.yml logs -f
+```
+
+- API 端口：`8000`
+- 进入管理后台后，将验证码方式设为 `browser` 或 `personal`
+
 ### 方式二：本地部署
 
 ```bash
 # 克隆项目
 git clone https://github.com/TheSmallHanCat/flow2api.git
-cd sora2api
+cd flow2api
 
 # 创建虚拟环境
 python -m venv venv
@@ -101,8 +124,36 @@ python main.py
 | `gemini-2.5-flash-image-portrait` | 图/文生图 | 竖屏 |
 | `gemini-3.0-pro-image-landscape` | 图/文生图 | 横屏 |
 | `gemini-3.0-pro-image-portrait` | 图/文生图 | 竖屏 |
+| `gemini-3.0-pro-image-square` | 图/文生图 | 方图 |
+| `gemini-3.0-pro-image-four-three` | 图/文生图 | 横屏 4:3 |
+| `gemini-3.0-pro-image-three-four` | 图/文生图 | 竖屏 3:4 |
+| `gemini-3.0-pro-image-landscape-2k` | 图/文生图(2K) | 横屏 |
+| `gemini-3.0-pro-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
+| `gemini-3.0-pro-image-square-2k` | 图/文生图(2K) | 方图 |
+| `gemini-3.0-pro-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
+| `gemini-3.0-pro-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
+| `gemini-3.0-pro-image-landscape-4k` | 图/文生图(4K) | 横屏 |
+| `gemini-3.0-pro-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
+| `gemini-3.0-pro-image-square-4k` | 图/文生图(4K) | 方图 |
+| `gemini-3.0-pro-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
+| `gemini-3.0-pro-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
 | `imagen-4.0-generate-preview-landscape` | 图/文生图 | 横屏 |
 | `imagen-4.0-generate-preview-portrait` | 图/文生图 | 竖屏 |
+| `gemini-3.1-flash-image-landscape` | 图/文生图 | 横屏 |
+| `gemini-3.1-flash-image-portrait` | 图/文生图 | 竖屏 |
+| `gemini-3.1-flash-image-square` | 图/文生图 | 方图 |
+| `gemini-3.1-flash-image-four-three` | 图/文生图 | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four` | 图/文生图 | 竖屏 3:4 |
+| `gemini-3.1-flash-image-landscape-2k` | 图/文生图(2K) | 横屏 |
+| `gemini-3.1-flash-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
+| `gemini-3.1-flash-image-square-2k` | 图/文生图(2K) | 方图 |
+| `gemini-3.1-flash-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
+| `gemini-3.1-flash-image-landscape-4k` | 图/文生图(4K) | 横屏 |
+| `gemini-3.1-flash-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
+| `gemini-3.1-flash-image-square-4k` | 图/文生图(4K) | 方图 |
+| `gemini-3.1-flash-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
+| `gemini-3.1-flash-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
 
 ### 视频生成
 
@@ -117,6 +168,12 @@ python main.py
 | `veo_2_1_fast_d_15_t2v_landscape` | 文生视频 | 横屏 |
 | `veo_2_0_t2v_portrait` | 文生视频 | 竖屏 |
 | `veo_2_0_t2v_landscape` | 文生视频 | 横屏 |
+| `veo_3_1_t2v_fast_portrait_ultra` | 文生视频 | 竖屏 |
+| `veo_3_1_t2v_fast_ultra` | 文生视频 | 横屏 |
+| `veo_3_1_t2v_fast_portrait_ultra_relaxed` | 文生视频 | 竖屏 |
+| `veo_3_1_t2v_fast_ultra_relaxed` | 文生视频 | 横屏 |
+| `veo_3_1_t2v_portrait` | 文生视频 | 竖屏 |
+| `veo_3_1_t2v_landscape` | 文生视频 | 横屏 |
 
 #### 首尾帧模型 (I2V - Image to Video)
 📸 **支持1-2张图片：1张作为首帧，2张作为首尾帧**
@@ -127,22 +184,120 @@ python main.py
 
 | 模型名称 | 说明| 尺寸 |
 |---------|---------|--------|
-| `veo_3_1_i2v_s_fast_fl_portrait` | 图生视频 | 竖屏 |
-| `veo_3_1_i2v_s_fast_fl_landscape` | 图生视频 | 横屏 |
+| `veo_3_1_i2v_s_fast_portrait_fl` | 图生视频 | 竖屏 |
+| `veo_3_1_i2v_s_fast_fl` | 图生视频 | 横屏 |
 | `veo_2_1_fast_d_15_i2v_portrait` | 图生视频 | 竖屏 |
 | `veo_2_1_fast_d_15_i2v_landscape` | 图生视频 | 横屏 |
 | `veo_2_0_i2v_portrait` | 图生视频 | 竖屏 |
 | `veo_2_0_i2v_landscape` | 图生视频 | 横屏 |
+| `veo_3_1_i2v_s_fast_portrait_ultra_fl` | 图生视频 | 竖屏 |
+| `veo_3_1_i2v_s_fast_ultra_fl` | 图生视频 | 横屏 |
+| `veo_3_1_i2v_s_fast_portrait_ultra_relaxed` | 图生视频 | 竖屏 |
+| `veo_3_1_i2v_s_fast_ultra_relaxed` | 图生视频 | 横屏 |
+| `veo_3_1_i2v_s_portrait` | 图生视频 | 竖屏 |
+| `veo_3_1_i2v_s_landscape` | 图生视频 | 横屏 |
 
 #### 多图生成 (R2V - Reference Images to Video)
 🖼️ **支持多张图片**
 
+> **2026-03-06 更新**
+>
+> - 已同步上游新版 `R2V` 视频请求体
+> - `textInput` 已切换为 `structuredPrompt.parts`
+> - 顶层新增 `mediaGenerationContext.batchId`
+> - 顶层新增 `useV2ModelConfig: true`
+> - 横屏 / 竖屏 `R2V` 模型共用同一套新版请求体
+> - 横屏 `R2V` 的上游 `videoModelKey` 已切换为 `*_landscape` 形式
+> - 根据当前上游协议，`referenceImages` 当前最多传 **3 张**
+
 | 模型名称 | 说明| 尺寸 |
 |---------|---------|--------|
-| `veo_3_0_r2v_fast_portrait` | 图生视频 | 竖屏 |
-| `veo_3_0_r2v_fast_landscape` | 图生视频 | 横屏 |
+| `veo_3_1_r2v_fast_portrait` | 图生视频 | 竖屏 |
+| `veo_3_1_r2v_fast` | 图生视频 | 横屏 |
+| `veo_3_1_r2v_fast_portrait_ultra` | 图生视频 | 竖屏 |
+| `veo_3_1_r2v_fast_ultra` | 图生视频 | 横屏 |
+| `veo_3_1_r2v_fast_portrait_ultra_relaxed` | 图生视频 | 竖屏 |
+| `veo_3_1_r2v_fast_ultra_relaxed` | 图生视频 | 横屏 |
+
+#### 视频放大模型 (Upsample)
+
+| 模型名称 | 说明 | 输出 |
+|---------|---------|--------|
+| `veo_3_1_t2v_fast_portrait_4k` | 文生视频放大 | 4K |
+| `veo_3_1_t2v_fast_4k` | 文生视频放大 | 4K |
+| `veo_3_1_t2v_fast_portrait_ultra_4k` | 文生视频放大 | 4K |
+| `veo_3_1_t2v_fast_ultra_4k` | 文生视频放大 | 4K |
+| `veo_3_1_t2v_fast_portrait_1080p` | 文生视频放大 | 1080P |
+| `veo_3_1_t2v_fast_1080p` | 文生视频放大 | 1080P |
+| `veo_3_1_t2v_fast_portrait_ultra_1080p` | 文生视频放大 | 1080P |
+| `veo_3_1_t2v_fast_ultra_1080p` | 文生视频放大 | 1080P |
+| `veo_3_1_i2v_s_fast_portrait_ultra_fl_4k` | 图生视频放大 | 4K |
+| `veo_3_1_i2v_s_fast_ultra_fl_4k` | 图生视频放大 | 4K |
+| `veo_3_1_i2v_s_fast_portrait_ultra_fl_1080p` | 图生视频放大 | 1080P |
+| `veo_3_1_i2v_s_fast_ultra_fl_1080p` | 图生视频放大 | 1080P |
+| `veo_3_1_r2v_fast_portrait_ultra_4k` | 多图视频放大 | 4K |
+| `veo_3_1_r2v_fast_ultra_4k` | 多图视频放大 | 4K |
+| `veo_3_1_r2v_fast_portrait_ultra_1080p` | 多图视频放大 | 1080P |
+| `veo_3_1_r2v_fast_ultra_1080p` | 多图视频放大 | 1080P |
 
 ## 📡 API 使用示例（需要使用流式）
+
+> 除了下方 `OpenAI-compatible` 示例，服务也支持 Gemini 官方格式：
+> - `POST /v1beta/models/{model}:generateContent`
+> - `POST /models/{model}:generateContent`
+> - `POST /v1beta/models/{model}:streamGenerateContent`
+> - `POST /models/{model}:streamGenerateContent`
+>
+> Gemini 官方格式支持以下认证方式：
+> - `Authorization: Bearer <api_key>`
+> - `x-goog-api-key: <api_key>`
+> - `?key=<api_key>`
+>
+> Gemini 官方图片请求体已兼容：
+> - `systemInstruction`
+> - `contents[].parts[].text`
+> - `contents[].parts[].inlineData`
+> - `contents[].parts[].fileData.fileUri`
+> - `generationConfig.responseModalities`
+> - `generationConfig.imageConfig.aspectRatio`
+> - `generationConfig.imageConfig.imageSize`
+
+### Gemini 官方 generateContent（文生图）
+
+> 已使用真实 Token 实测通过。
+> 如需流式返回，可将路径替换为 `:streamGenerateContent?alt=sse`。
+
+```bash
+curl -X POST "http://localhost:8000/models/gemini-3.1-flash-image:generateContent" \
+  -H "x-goog-api-key: han1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "systemInstruction": {
+      "parts": [
+        {
+          "text": "Return an image only."
+        }
+      ]
+    },
+    "contents": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "一颗放在木桌上的红苹果，棚拍光线，极简背景"
+          }
+        ]
+      }
+    ],
+    "generationConfig": {
+      "responseModalities": ["IMAGE"],
+      "imageConfig": {
+        "aspectRatio": "1:1",
+        "imageSize": "1K"
+      }
+    }
+  }'
+```
 
 ### 文生图
 
@@ -151,7 +306,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Authorization: Bearer han1234" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-2.5-flash-image-landscape",
+    "model": "gemini-3.1-flash-image-landscape",
     "messages": [
       {
         "role": "user",
@@ -169,7 +324,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   -H "Authorization: Bearer han1234" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "imagen-4.0-generate-preview-landscape",
+    "model": "gemini-3.1-flash-image-landscape",
     "messages": [
       {
         "role": "user",
@@ -235,6 +390,51 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
             "type": "image_url",
             "image_url": {
               "url": "data:image/jpeg;base64,<尾帧base64>"
+            }
+          }
+        ]
+      }
+    ],
+    "stream": true
+  }'
+```
+
+### 多图生成视频
+
+> `R2V` 会由服务端自动组装新版视频请求体，调用方仍然使用 OpenAI 兼容输入即可。
+> 服务端会将横屏 `R2V` 自动映射到最新的 `*_landscape` 上游模型键。
+> 当前最多传 **3 张参考图**。
+
+```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Authorization: Bearer han1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "veo_3_1_r2v_fast_portrait",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "以三张参考图的人物和场景为基础，生成一段镜头平滑推进的竖屏视频"
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "data:image/jpeg;base64/<参考图1base64>"
+            }
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "data:image/jpeg;base64/<参考图2base64>"
+            }
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "data:image/jpeg;base64/<参考图3base64>"
             }
           }
         ]
