@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     config.set_captcha_method(captcha_config.captcha_method)
     config.set_yescaptcha_api_key(captcha_config.yescaptcha_api_key)
     config.set_yescaptcha_base_url(captcha_config.yescaptcha_base_url)
+    config.set_yescaptcha_task_type(captcha_config.yescaptcha_task_type)
     config.set_capmonster_api_key(captcha_config.capmonster_api_key)
     config.set_capmonster_base_url(captcha_config.capmonster_base_url)
     config.set_ezcaptcha_api_key(captcha_config.ezcaptcha_api_key)
@@ -81,6 +82,10 @@ async def lifespan(app: FastAPI):
     config.set_remote_browser_base_url(captcha_config.remote_browser_base_url)
     config.set_remote_browser_api_key(captcha_config.remote_browser_api_key)
     config.set_remote_browser_timeout(captcha_config.remote_browser_timeout)
+    config.set_ant_browser_base_url(captcha_config.ant_browser_base_url)
+    config.set_ant_browser_api_key(captcha_config.ant_browser_api_key)
+    config.set_ant_browser_api_header(captcha_config.ant_browser_api_header)
+    config.set_ant_browser_launch_code(captcha_config.ant_browser_launch_code)
 
     # Initialize browser captcha service if needed
     browser_service = None
@@ -105,7 +110,7 @@ async def lifespan(app: FastAPI):
             # 没有可用的project_id时，打开登录窗口供用户手动操作
             await browser_service.open_login_window()
             print("⚠ No active token with project_id found, opened login window for manual setup")
-    elif captcha_config.captcha_method == "browser":
+    elif captcha_config.captcha_method in {"browser", "ant_browser"}:
         from .services.browser_captcha import BrowserCaptchaService
         browser_service = await BrowserCaptchaService.get_instance(db)
         await browser_service.warmup_browser_slots()

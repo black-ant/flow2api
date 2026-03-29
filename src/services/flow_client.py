@@ -2134,11 +2134,11 @@ class FlowClient:
             action: reCAPTCHA action类型
                 - IMAGE_GENERATION: 图片生成和2K/4K图片放大 (默认)
                 - VIDEO_GENERATION: 视频生成和视频放大
-            token_id: 当前业务 token id（browser 模式下用于读取 token 级打码代理）
+            token_id: 当前业务 token id（browser/ant_browser 模式下用于读取 token 级打码代理）
         
         Returns:
             (token, browser_id) 元组。
-            - browser 模式: browser_id 为本地浏览器 ID
+            - browser/ant_browser 模式: browser_id 为本地浏览器 ID
             - remote_browser 模式: browser_id 为远程 session_id
             - 其他模式: browser_id 为 None
         """
@@ -2170,7 +2170,7 @@ class FlowClient:
                 self._set_request_fingerprint(None)
                 return None, None
         # 有头浏览器打码 (playwright)
-        elif captcha_method == "browser":
+        elif captcha_method in {"browser", "ant_browser"}:
             try:
                 from .browser_captcha import BrowserCaptchaService
                 service = await BrowserCaptchaService.get_instance(self.db)
@@ -2181,17 +2181,17 @@ class FlowClient:
             except RuntimeError as e:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)
-                debug_logger.log_error(f"[reCAPTCHA Browser] {error_msg}")
-                print(f"[reCAPTCHA] ❌ 有头浏览器打码失败: {error_msg}")
+                debug_logger.log_error(f"[reCAPTCHA {captcha_method}] {error_msg}")
+                print(f"[reCAPTCHA] ❌ {captcha_method} 打码失败: {error_msg}")
                 self._set_request_fingerprint(None)
                 return None, None
             except ImportError as e:
-                debug_logger.log_error(f"[reCAPTCHA Browser] 导入失败: {str(e)}")
-                print(f"[reCAPTCHA] ❌ playwright 未安装，请运行: pip install playwright && python -m playwright install chromium")
+                debug_logger.log_error(f"[reCAPTCHA {captcha_method}] 导入失败: {str(e)}")
+                print(f"[reCAPTCHA] ❌ playwright 未安装，请运行: pip install playwright")
                 self._set_request_fingerprint(None)
                 return None, None
             except Exception as e:
-                debug_logger.log_error(f"[reCAPTCHA Browser] 错误: {str(e)}")
+                debug_logger.log_error(f"[reCAPTCHA {captcha_method}] 错误: {str(e)}")
                 self._set_request_fingerprint(None)
                 return None, None
         elif captcha_method == "remote_browser":
@@ -2240,7 +2240,7 @@ class FlowClient:
         if method == "yescaptcha":
             client_key = config.yescaptcha_api_key
             base_url = config.yescaptcha_base_url
-            task_type = "RecaptchaV3TaskProxylessM1"
+            task_type = config.yescaptcha_task_type
         elif method == "capmonster":
             client_key = config.capmonster_api_key
             base_url = config.capmonster_base_url

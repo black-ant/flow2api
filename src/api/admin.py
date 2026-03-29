@@ -28,6 +28,12 @@ concurrency_manager: Optional[ConcurrencyManager] = None
 # Store active admin session tokens (in production, use Redis or database)
 active_admin_tokens = set()
 SUPPORTED_API_CAPTCHA_METHODS = {"yescaptcha", "capmonster", "ezcaptcha", "capsolver"}
+SUPPORTED_YESCAPTCHA_TASK_TYPES = {
+    "RecaptchaV3TaskProxyless",
+    "RecaptchaV3TaskProxylessM1",
+    "RecaptchaV3TaskProxylessM1S7",
+    "RecaptchaV3TaskProxylessM1S9",
+}
 
 
 def _mask_token(token: Optional[str]) -> str:
@@ -259,7 +265,7 @@ async def _solve_recaptcha_with_api_service(
     if method == "yescaptcha":
         client_key = config.yescaptcha_api_key
         base_url = config.yescaptcha_base_url
-        task_type = "RecaptchaV3TaskProxylessM1"
+        task_type = config.yescaptcha_task_type
     elif method == "capmonster":
         client_key = config.capmonster_api_key
         base_url = config.capmonster_base_url
@@ -1438,6 +1444,7 @@ async def update_captcha_config(
     captcha_method = request.get("captcha_method")
     yescaptcha_api_key = request.get("yescaptcha_api_key")
     yescaptcha_base_url = request.get("yescaptcha_base_url")
+    yescaptcha_task_type = request.get("yescaptcha_task_type", "RecaptchaV3TaskProxylessM1")
     capmonster_api_key = request.get("capmonster_api_key")
     capmonster_base_url = request.get("capmonster_base_url")
     ezcaptcha_api_key = request.get("ezcaptcha_api_key")
@@ -1447,6 +1454,10 @@ async def update_captcha_config(
     remote_browser_base_url = request.get("remote_browser_base_url")
     remote_browser_api_key = request.get("remote_browser_api_key")
     remote_browser_timeout = request.get("remote_browser_timeout", 60)
+    ant_browser_base_url = request.get("ant_browser_base_url")
+    ant_browser_api_key = request.get("ant_browser_api_key")
+    ant_browser_api_header = request.get("ant_browser_api_header", "X-Ant-Api-Key")
+    ant_browser_launch_code = request.get("ant_browser_launch_code")
     browser_proxy_enabled = request.get("browser_proxy_enabled", False)
     browser_proxy_url = request.get("browser_proxy_url", "")
     browser_count = request.get("browser_count", 1)
@@ -1463,10 +1474,22 @@ async def update_captcha_config(
         except RuntimeError as e:
             return {"success": False, "message": str(e)}
 
+    yescaptcha_task_type = (yescaptcha_task_type or "RecaptchaV3TaskProxylessM1").strip()
+    if yescaptcha_task_type not in SUPPORTED_YESCAPTCHA_TASK_TYPES:
+        return {"success": False, "message": "YesCaptcha task type 不支持"}
+
+    if ant_browser_base_url:
+        try:
+            ant_browser_base_url = _normalize_http_base_url(ant_browser_base_url)
+        except RuntimeError as e:
+            return {"success": False, "message": str(e).replace("远程打码服务", "ant_browser 服务")}
+
     try:
         remote_browser_timeout = max(5, int(remote_browser_timeout or 60))
     except Exception:
         return {"success": False, "message": "远程打码超时时间必须是整数秒"}
+
+    ant_browser_api_header = (ant_browser_api_header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
 
     if captcha_method == "remote_browser":
         if not (remote_browser_base_url or "").strip():
@@ -1474,10 +1497,17 @@ async def update_captcha_config(
         if not (remote_browser_api_key or "").strip():
             return {"success": False, "message": "remote_browser 模式需要配置远程打码服务 API Key"}
 
+    if captcha_method == "ant_browser":
+        if not (ant_browser_base_url or "").strip():
+            return {"success": False, "message": "ant_browser 模式需要配置 ant-chrome LaunchServer 地址"}
+        if not (ant_browser_launch_code or "").strip():
+            return {"success": False, "message": "ant_browser 模式需要配置 ant-chrome 启动码"}
+
     await db.update_captcha_config(
         captcha_method=captcha_method,
         yescaptcha_api_key=yescaptcha_api_key,
         yescaptcha_base_url=yescaptcha_base_url,
+        yescaptcha_task_type=yescaptcha_task_type,
         capmonster_api_key=capmonster_api_key,
         capmonster_base_url=capmonster_base_url,
         ezcaptcha_api_key=ezcaptcha_api_key,
@@ -1487,13 +1517,17 @@ async def update_captcha_config(
         remote_browser_base_url=remote_browser_base_url,
         remote_browser_api_key=remote_browser_api_key,
         remote_browser_timeout=remote_browser_timeout,
+        ant_browser_base_url=ant_browser_base_url,
+        ant_browser_api_key=ant_browser_api_key,
+        ant_browser_api_header=ant_browser_api_header,
+        ant_browser_launch_code=ant_browser_launch_code,
         browser_proxy_enabled=browser_proxy_enabled,
         browser_proxy_url=browser_proxy_url if browser_proxy_enabled else None,
         browser_count=max(1, int(browser_count)) if browser_count else 1
     )
 
     # 如果使用 browser 打码，热重载浏览器数量配置
-    if captcha_method == "browser":
+    if captcha_method in {"browser", "ant_browser"}:
         try:
             from ..services.browser_captcha import BrowserCaptchaService
             service = await BrowserCaptchaService.get_instance(db)
@@ -1515,6 +1549,7 @@ async def get_captcha_config(token: str = Depends(verify_admin_token)):
         "captcha_method": captcha_config.captcha_method,
         "yescaptcha_api_key": captcha_config.yescaptcha_api_key,
         "yescaptcha_base_url": captcha_config.yescaptcha_base_url,
+        "yescaptcha_task_type": captcha_config.yescaptcha_task_type,
         "capmonster_api_key": captcha_config.capmonster_api_key,
         "capmonster_base_url": captcha_config.capmonster_base_url,
         "ezcaptcha_api_key": captcha_config.ezcaptcha_api_key,
@@ -1524,6 +1559,10 @@ async def get_captcha_config(token: str = Depends(verify_admin_token)):
         "remote_browser_base_url": captcha_config.remote_browser_base_url,
         "remote_browser_api_key": captcha_config.remote_browser_api_key,
         "remote_browser_timeout": captcha_config.remote_browser_timeout,
+        "ant_browser_base_url": captcha_config.ant_browser_base_url,
+        "ant_browser_api_key": captcha_config.ant_browser_api_key,
+        "ant_browser_api_header": captcha_config.ant_browser_api_header,
+        "ant_browser_launch_code": captcha_config.ant_browser_launch_code,
         "browser_proxy_enabled": captcha_config.browser_proxy_enabled,
         "browser_proxy_url": captcha_config.browser_proxy_url or "",
         "browser_count": captcha_config.browser_count

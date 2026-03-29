@@ -176,9 +176,10 @@ class CaptchaConfig(BaseModel):
     """Captcha configuration"""
 
     id: int = 1
-    captcha_method: str = "browser"  # yescaptcha/capmonster/ezcaptcha/capsolver/browser/personal/remote_browser
+    captcha_method: str = "browser"  # yescaptcha/capmonster/ezcaptcha/capsolver/browser/ant_browser/personal/remote_browser
     yescaptcha_api_key: str = ""
     yescaptcha_base_url: str = "https://api.yescaptcha.com"
+    yescaptcha_task_type: str = "RecaptchaV3TaskProxylessM1"
     capmonster_api_key: str = ""
     capmonster_base_url: str = "https://api.capmonster.cloud"
     ezcaptcha_api_key: str = ""
@@ -193,6 +194,10 @@ class CaptchaConfig(BaseModel):
     browser_proxy_enabled: bool = False  # 浏览器打码是否启用代理
     browser_proxy_url: Optional[str] = None  # 浏览器打码代理URL
     browser_count: int = 1  # 浏览器打码实例数量
+    ant_browser_base_url: str = ""
+    ant_browser_api_key: str = ""
+    ant_browser_api_header: str = "X-Ant-Api-Key"
+    ant_browser_launch_code: str = ""
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

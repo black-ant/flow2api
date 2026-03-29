@@ -412,6 +412,32 @@ class Config:
         self._config["captcha"]["yescaptcha_base_url"] = base_url
 
     @property
+    def yescaptcha_task_type(self) -> str:
+        """Get YesCaptcha task type"""
+        value = self._config.get("captcha", {}).get("yescaptcha_task_type", "RecaptchaV3TaskProxylessM1")
+        normalized = (value or "RecaptchaV3TaskProxylessM1").strip()
+        allowed = {
+            "RecaptchaV3TaskProxyless",
+            "RecaptchaV3TaskProxylessM1",
+            "RecaptchaV3TaskProxylessM1S7",
+            "RecaptchaV3TaskProxylessM1S9",
+        }
+        return normalized if normalized in allowed else "RecaptchaV3TaskProxylessM1"
+
+    def set_yescaptcha_task_type(self, task_type: str):
+        """Set YesCaptcha task type"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        allowed = {
+            "RecaptchaV3TaskProxyless",
+            "RecaptchaV3TaskProxylessM1",
+            "RecaptchaV3TaskProxylessM1S7",
+            "RecaptchaV3TaskProxylessM1S9",
+        }
+        normalized = (task_type or "RecaptchaV3TaskProxylessM1").strip()
+        self._config["captcha"]["yescaptcha_task_type"] = normalized if normalized in allowed else "RecaptchaV3TaskProxylessM1"
+
+    @property
     def capmonster_api_key(self) -> str:
         """Get CapMonster API key"""
         return self._config.get("captcha", {}).get("capmonster_api_key", "")
@@ -517,6 +543,52 @@ class Config:
         except Exception:
             normalized = 60
         self._config["captcha"]["remote_browser_timeout"] = normalized
+
+    @property
+    def ant_browser_base_url(self) -> str:
+        """Get ant-chrome launch server base URL"""
+        return self._config.get("captcha", {}).get("ant_browser_base_url", "")
+
+    def set_ant_browser_base_url(self, base_url: str):
+        """Set ant-chrome launch server base URL"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["ant_browser_base_url"] = (base_url or "").strip()
+
+    @property
+    def ant_browser_api_key(self) -> str:
+        """Get ant-chrome launch server API key"""
+        return self._config.get("captcha", {}).get("ant_browser_api_key", "")
+
+    def set_ant_browser_api_key(self, api_key: str):
+        """Set ant-chrome launch server API key"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["ant_browser_api_key"] = (api_key or "").strip()
+
+    @property
+    def ant_browser_api_header(self) -> str:
+        """Get ant-chrome launch server API key header"""
+        header = self._config.get("captcha", {}).get("ant_browser_api_header", "X-Ant-Api-Key")
+        return (header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
+
+    def set_ant_browser_api_header(self, header: str):
+        """Set ant-chrome launch server API key header"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        normalized = (header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
+        self._config["captcha"]["ant_browser_api_header"] = normalized
+
+    @property
+    def ant_browser_launch_code(self) -> str:
+        """Get ant-chrome launch code"""
+        return self._config.get("captcha", {}).get("ant_browser_launch_code", "")
+
+    def set_ant_browser_launch_code(self, code: str):
+        """Set ant-chrome launch code"""
+        if "captcha" not in self._config:
+            self._config["captcha"] = {}
+        self._config["captcha"]["ant_browser_launch_code"] = (code or "").strip()
 
 
 # Global config instance

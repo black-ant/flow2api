@@ -10,6 +10,7 @@ import signal
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
 import asyncio
+import json
 import time
 import re
 import random
@@ -17,6 +18,8 @@ import uuid
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from urllib.parse import urlparse, unquote, parse_qs
+
+from curl_cffi.requests import AsyncSession
 
 from ..core.logger import debug_logger
 from ..core.config import config
@@ -58,121 +61,65 @@ ALLOW_DOCKER_HEADED = (
 DOCKER_HEADED_BLOCKED = IS_DOCKER and not ALLOW_DOCKER_HEADED
 
 
-# ==================== playwright 自动安装 ====================
-def _run_pip_install(package: str, use_mirror: bool = False) -> bool:
-    """运行 pip install 命令"""
-    cmd = [sys.executable, '-m', 'pip', 'install', package]
-    if use_mirror:
-        cmd.extend(['-i', 'https://pypi.tuna.tsinghua.edu.cn/simple'])
-    
-    try:
-        debug_logger.log_info(f"[BrowserCaptcha] 正在安装 {package}...")
-        print(f"[BrowserCaptcha] 正在安装 {package}...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode == 0:
-            debug_logger.log_info(f"[BrowserCaptcha] ✅ {package} 安装成功")
-            print(f"[BrowserCaptcha] ✅ {package} 安装成功")
-            return True
-        else:
-            debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装失败: {result.stderr[:200]}")
-            return False
-    except Exception as e:
-        debug_logger.log_warning(f"[BrowserCaptcha] {package} 安装异常: {e}")
-        return False
-
-
-def _run_playwright_install(use_mirror: bool = False) -> bool:
-    """安装 playwright chromium 浏览器"""
-    cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
-    env = os.environ.copy()
-    
-    if use_mirror:
-        # 使用国内镜像
-        env['PLAYWRIGHT_DOWNLOAD_HOST'] = 'https://npmmirror.com/mirrors/playwright'
-    
-    try:
-        debug_logger.log_info("[BrowserCaptcha] 正在安装 chromium 浏览器...")
-        print("[BrowserCaptcha] 正在安装 chromium 浏览器...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-        if result.returncode == 0:
-            debug_logger.log_info("[BrowserCaptcha] ✅ chromium 浏览器安装成功")
-            print("[BrowserCaptcha] ✅ chromium 浏览器安装成功")
-            return True
-        else:
-            debug_logger.log_warning(f"[BrowserCaptcha] chromium 安装失败: {result.stderr[:200]}")
-            return False
-    except Exception as e:
-        debug_logger.log_warning(f"[BrowserCaptcha] chromium 安装异常: {e}")
-        return False
-
-
 def _ensure_playwright_installed() -> bool:
-    """确保 playwright 已安装"""
+    """确保 playwright Python 包已安装，不执行自动安装。"""
     try:
         import playwright
         debug_logger.log_info("[BrowserCaptcha] playwright 已安装")
         return True
     except ImportError:
-        pass
-    
-    debug_logger.log_info("[BrowserCaptcha] playwright 未安装，开始自动安装...")
-    print("[BrowserCaptcha] playwright 未安装，开始自动安装...")
-    
-    # 先尝试官方源
-    if _run_pip_install('playwright', use_mirror=False):
-        return True
-    
-    # 官方源失败，尝试国内镜像
-    debug_logger.log_info("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    print("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    if _run_pip_install('playwright', use_mirror=True):
-        return True
-    
-    debug_logger.log_error("[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright")
-    print("[BrowserCaptcha] ❌ playwright 自动安装失败，请手动安装: pip install playwright")
-    return False
+        debug_logger.log_error("[BrowserCaptcha] playwright 未安装，请手动安装: pip install playwright")
+        print("[BrowserCaptcha] ❌ playwright 未安装，请手动安装: pip install playwright")
+        return False
 
 
-def _ensure_browser_installed() -> bool:
-    """确保 chromium 浏览器已安装"""
-    try:
-        detect_script = (
-            "from playwright.sync_api import sync_playwright\n"
-            "with sync_playwright() as p:\n"
-            "    print(p.chromium.executable_path or '')\n"
-        )
-        env = os.environ.copy()
-        env.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "0") or "0")
-        result = subprocess.run(
-            [sys.executable, "-c", detect_script],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=env,
-        )
-        browser_path = (result.stdout or "").strip().splitlines()
-        browser_path = browser_path[-1].strip() if browser_path else ""
-        if result.returncode == 0 and browser_path and os.path.exists(browser_path):
-            debug_logger.log_info(f"[BrowserCaptcha] chromium 浏览器已安装: {browser_path}")
-            return True
-    except Exception as e:
-        debug_logger.log_info(f"[BrowserCaptcha] 检测浏览器时出错: {e}")
-    
-    debug_logger.log_info("[BrowserCaptcha] chromium 浏览器未安装，开始自动安装...")
-    print("[BrowserCaptcha] chromium 浏览器未安装，开始自动安装...")
-    
-    # 先尝试官方源
-    if _run_playwright_install(use_mirror=False):
+def _normalize_http_base_url(base_url: str) -> str:
+    base_url = (base_url or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        raise RuntimeError("ant_browser 服务地址格式错误，必须是 http(s)://host[:port]")
+    return base_url
+
+
+def _has_ant_browser_config() -> bool:
+    return bool((config.ant_browser_base_url or "").strip() and (config.ant_browser_launch_code or "").strip())
+
+
+def _use_ant_browser_mode() -> bool:
+    return (config.captcha_method or "").strip().lower() == "ant_browser"
+
+
+def _resolve_ant_browser_header_name() -> str:
+    return (config.ant_browser_api_header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
+
+
+def _get_custom_browser_executable_path() -> Optional[str]:
+    """读取用户指定的浏览器可执行文件路径。"""
+    browser_path = os.environ.get("BROWSER_EXECUTABLE_PATH", "").strip()
+    if not browser_path:
+        return None
+    return browser_path
+
+
+def _ensure_local_browser_ready() -> bool:
+    """检查本地浏览器可执行文件是否已准备好，不执行自动安装。"""
+    custom_browser_path = _get_custom_browser_executable_path()
+    if custom_browser_path and os.path.exists(custom_browser_path):
+        debug_logger.log_info(f"[BrowserCaptcha] 使用预置浏览器可执行文件: {custom_browser_path}")
+        print(f"[BrowserCaptcha] 使用预置浏览器可执行文件: {custom_browser_path}")
         return True
-    
-    # 官方源失败，尝试国内镜像
-    debug_logger.log_info("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    print("[BrowserCaptcha] 官方源安装失败，尝试国内镜像...")
-    if _run_playwright_install(use_mirror=True):
+
+    if _use_ant_browser_mode() and _has_ant_browser_config():
+        debug_logger.log_info("[BrowserCaptcha] 已配置 ant-chrome，将通过 LaunchServer 启动浏览器")
         return True
-    
-    debug_logger.log_error("[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium")
-    print("[BrowserCaptcha] ❌ chromium 浏览器自动安装失败，请手动安装: python -m playwright install chromium")
+
+    debug_logger.log_warning(
+        "[BrowserCaptcha] 未配置 ant-chrome，且未提供 BROWSER_EXECUTABLE_PATH。"
+        "browser 模式将无法启动本地浏览器。"
+    )
+    print("[BrowserCaptcha] ⚠️ 未配置 ant-chrome，且未提供 BROWSER_EXECUTABLE_PATH")
+    print("[BrowserCaptcha] 请配置 ant_browser_* 或设置 BROWSER_EXECUTABLE_PATH")
     return False
 
 
@@ -199,8 +146,7 @@ else:
         try:
             from playwright.async_api import async_playwright, Route, BrowserContext
             PLAYWRIGHT_AVAILABLE = True
-            # 检查并安装浏览器
-            _ensure_browser_installed()
+            _ensure_local_browser_ready()
         except ImportError as e:
             debug_logger.log_error(f"[BrowserCaptcha] playwright 导入失败: {e}")
             print(f"[BrowserCaptcha] ❌ playwright 导入失败: {e}")
@@ -592,6 +538,86 @@ class TokenBrowser:
 
         return proxy_option, raw_proxy_url, proxy_source
 
+    def _get_ant_browser_service_config(self) -> tuple[str, str, str, str, int]:
+        base_url = _normalize_http_base_url(config.ant_browser_base_url)
+        launch_code = (config.ant_browser_launch_code or "").strip()
+        api_key = (config.ant_browser_api_key or "").strip()
+        api_header = _resolve_ant_browser_header_name()
+        timeout = max(5, int(config.remote_browser_timeout or 60))
+
+        if not base_url:
+            raise RuntimeError("ant_browser 服务地址未配置")
+        if not launch_code:
+            raise RuntimeError("ant_browser 启动码未配置")
+
+        return base_url, api_key, api_header, launch_code, timeout
+
+    async def _call_ant_browser_launch(self) -> Dict[str, Any]:
+        base_url, api_key, api_header, launch_code, timeout = self._get_ant_browser_service_config()
+        url = f"{base_url}/api/launch"
+        headers: Dict[str, str] = {
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        if api_key:
+            headers[api_header] = api_key
+
+        payload = {"code": launch_code}
+
+        try:
+            async with AsyncSession() as session:
+                response = await session.post(
+                    url=url,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout,
+                    impersonate="chrome120",
+                )
+        except Exception as e:
+            raise RuntimeError(f"ant_browser 启动请求失败: {e}") from e
+
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        response_text = response.text or ""
+        try:
+            payload = response.json() if response_text else {}
+        except Exception:
+            payload = None
+
+        if status_code >= 400:
+            detail = ""
+            if isinstance(payload, dict):
+                detail = str(payload.get("error") or payload.get("message") or "").strip()
+            if not detail:
+                detail = response_text[:300] if response_text else f"HTTP {status_code}"
+            raise RuntimeError(f"ant_browser 启动失败: {detail}")
+
+        if not isinstance(payload, dict):
+            raise RuntimeError("ant_browser 返回格式错误")
+
+        cdp_url = str(payload.get("cdpUrl") or "").strip()
+        if not cdp_url:
+            raise RuntimeError(f"ant_browser 返回缺少 cdpUrl: {json.dumps(payload, ensure_ascii=False)[:300]}")
+
+        return payload
+
+    async def _create_ant_browser(self, playwright, raw_proxy_url: Optional[str] = None) -> tuple:
+        launch_payload = await self._call_ant_browser_launch()
+        cdp_url = str(launch_payload.get("cdpUrl") or "").strip()
+        browser = await playwright.chromium.connect_over_cdp(cdp_url)
+
+        contexts = list(getattr(browser, "contexts", []))
+        context = contexts[0] if contexts else await browser.new_context(locale="en-US")
+
+        if raw_proxy_url:
+            debug_logger.log_info(
+                f"[BrowserCaptcha] Token-{self.token_id} ant-chrome browser connected (proxy configured in flow2api: {raw_proxy_url})"
+            )
+        debug_logger.log_info(
+            f"[BrowserCaptcha] Token-{self.token_id} connected to ant-chrome via CDP "
+            f"(profile={launch_payload.get('profileName') or launch_payload.get('profileId') or 'unknown'})"
+        )
+        return browser, context
+
     async def _create_browser(self, token_proxy_url: Optional[str] = None, manage_slot_pid: bool = True) -> tuple:
         """Create a browser instance; shared-slot browsers track PIDs while temporary browsers do not."""
         width = self._profile_viewport["width"]
@@ -611,6 +637,12 @@ class TokenBrowser:
         }
 
         try:
+            if _use_ant_browser_mode():
+                browser, context = await self._create_ant_browser(playwright, raw_proxy_url=raw_proxy_url)
+                if manage_slot_pid:
+                    self._write_pid_file(None)
+                return playwright, browser, context
+
             browser_args = [
                 '--disable-blink-features=AutomationControlled',
                 '--disable-quic',
@@ -643,6 +675,8 @@ class TokenBrowser:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] Token-{self.token_id} using custom browser executable: {browser_executable_path}"
                 )
+            elif not _ensure_local_browser_ready():
+                raise RuntimeError("未配置 ant-chrome，且本地浏览器可执行文件不可用")
 
             browser = await playwright.chromium.launch(
                 headless=False,
@@ -1731,7 +1765,7 @@ class BrowserCaptchaService:
         if not PLAYWRIGHT_AVAILABLE or async_playwright is None:
             raise RuntimeError(
                 "playwright 未安装或不可用。"
-                "请手动安装: pip install playwright && python -m playwright install chromium"
+                "请手动安装: pip install playwright"
             )
     
     async def _load_browser_count(self):

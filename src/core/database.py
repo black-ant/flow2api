@@ -211,18 +211,28 @@ class Database:
             captcha_method = "browser"
             yescaptcha_api_key = ""
             yescaptcha_base_url = "https://api.yescaptcha.com"
+            yescaptcha_task_type = "RecaptchaV3TaskProxylessM1"
             remote_browser_base_url = ""
             remote_browser_api_key = ""
             remote_browser_timeout = 60
+            ant_browser_base_url = ""
+            ant_browser_api_key = ""
+            ant_browser_api_header = "X-Ant-Api-Key"
+            ant_browser_launch_code = ""
 
             if config_dict:
                 captcha_config = config_dict.get("captcha", {})
                 captcha_method = captcha_config.get("captcha_method", "browser")
                 yescaptcha_api_key = captcha_config.get("yescaptcha_api_key", "")
                 yescaptcha_base_url = captcha_config.get("yescaptcha_base_url", "https://api.yescaptcha.com")
+                yescaptcha_task_type = captcha_config.get("yescaptcha_task_type", "RecaptchaV3TaskProxylessM1")
                 remote_browser_base_url = captcha_config.get("remote_browser_base_url", "")
                 remote_browser_api_key = captcha_config.get("remote_browser_api_key", "")
                 remote_browser_timeout = captcha_config.get("remote_browser_timeout", 60)
+                ant_browser_base_url = captcha_config.get("ant_browser_base_url", "")
+                ant_browser_api_key = captcha_config.get("ant_browser_api_key", "")
+                ant_browser_api_header = captcha_config.get("ant_browser_api_header", "X-Ant-Api-Key")
+                ant_browser_launch_code = captcha_config.get("ant_browser_launch_code", "")
             try:
                 remote_browser_timeout = max(5, int(remote_browser_timeout))
             except Exception:
@@ -230,17 +240,23 @@ class Database:
 
             await db.execute("""
                 INSERT INTO captcha_config (
-                    id, captcha_method, yescaptcha_api_key, yescaptcha_base_url,
-                    remote_browser_base_url, remote_browser_api_key, remote_browser_timeout
+                    id, captcha_method, yescaptcha_api_key, yescaptcha_base_url, yescaptcha_task_type,
+                    remote_browser_base_url, remote_browser_api_key, remote_browser_timeout,
+                    ant_browser_base_url, ant_browser_api_key, ant_browser_api_header, ant_browser_launch_code
                 )
-                VALUES (1, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 captcha_method,
                 yescaptcha_api_key,
                 yescaptcha_base_url,
+                yescaptcha_task_type,
                 remote_browser_base_url,
                 remote_browser_api_key,
                 remote_browser_timeout,
+                ant_browser_base_url,
+                ant_browser_api_key,
+                ant_browser_api_header,
+                ant_browser_launch_code,
             ))
 
         # Ensure plugin_config has a row
@@ -320,6 +336,7 @@ class Database:
                         captcha_method TEXT DEFAULT 'browser',
                         yescaptcha_api_key TEXT DEFAULT '',
                         yescaptcha_base_url TEXT DEFAULT 'https://api.yescaptcha.com',
+                        yescaptcha_task_type TEXT DEFAULT 'RecaptchaV3TaskProxylessM1',
                         capmonster_api_key TEXT DEFAULT '',
                         capmonster_base_url TEXT DEFAULT 'https://api.capmonster.cloud',
                         ezcaptcha_api_key TEXT DEFAULT '',
@@ -329,6 +346,10 @@ class Database:
                         remote_browser_base_url TEXT DEFAULT '',
                         remote_browser_api_key TEXT DEFAULT '',
                         remote_browser_timeout INTEGER DEFAULT 60,
+                        ant_browser_base_url TEXT DEFAULT '',
+                        ant_browser_api_key TEXT DEFAULT '',
+                        ant_browser_api_header TEXT DEFAULT 'X-Ant-Api-Key',
+                        ant_browser_launch_code TEXT DEFAULT '',
                         website_key TEXT DEFAULT '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV',
                         page_action TEXT DEFAULT 'IMAGE_GENERATION',
                         browser_proxy_enabled BOOLEAN DEFAULT 0,
@@ -407,6 +428,7 @@ class Database:
                 captcha_columns_to_add = [
                     ("browser_proxy_enabled", "BOOLEAN DEFAULT 0"),
                     ("browser_proxy_url", "TEXT"),
+                    ("yescaptcha_task_type", "TEXT DEFAULT 'RecaptchaV3TaskProxylessM1'"),
                     ("capmonster_api_key", "TEXT DEFAULT ''"),
                     ("capmonster_base_url", "TEXT DEFAULT 'https://api.capmonster.cloud'"),
                     ("ezcaptcha_api_key", "TEXT DEFAULT ''"),
@@ -417,6 +439,10 @@ class Database:
                     ("remote_browser_base_url", "TEXT DEFAULT ''"),
                     ("remote_browser_api_key", "TEXT DEFAULT ''"),
                     ("remote_browser_timeout", "INTEGER DEFAULT 60"),
+                    ("ant_browser_base_url", "TEXT DEFAULT ''"),
+                    ("ant_browser_api_key", "TEXT DEFAULT ''"),
+                    ("ant_browser_api_header", "TEXT DEFAULT 'X-Ant-Api-Key'"),
+                    ("ant_browser_launch_code", "TEXT DEFAULT ''"),
                 ]
 
                 for col_name, col_type in captcha_columns_to_add:
@@ -647,6 +673,7 @@ class Database:
                     captcha_method TEXT DEFAULT 'browser',
                     yescaptcha_api_key TEXT DEFAULT '',
                     yescaptcha_base_url TEXT DEFAULT 'https://api.yescaptcha.com',
+                    yescaptcha_task_type TEXT DEFAULT 'RecaptchaV3TaskProxylessM1',
                     capmonster_api_key TEXT DEFAULT '',
                     capmonster_base_url TEXT DEFAULT 'https://api.capmonster.cloud',
                     ezcaptcha_api_key TEXT DEFAULT '',
@@ -656,6 +683,10 @@ class Database:
                     remote_browser_base_url TEXT DEFAULT '',
                     remote_browser_api_key TEXT DEFAULT '',
                     remote_browser_timeout INTEGER DEFAULT 60,
+                    ant_browser_base_url TEXT DEFAULT '',
+                    ant_browser_api_key TEXT DEFAULT '',
+                    ant_browser_api_header TEXT DEFAULT 'X-Ant-Api-Key',
+                    ant_browser_launch_code TEXT DEFAULT '',
                     website_key TEXT DEFAULT '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV',
                     page_action TEXT DEFAULT 'IMAGE_GENERATION',
 
@@ -1497,6 +1528,7 @@ class Database:
             config.set_captcha_method(captcha_config.captcha_method)
             config.set_yescaptcha_api_key(captcha_config.yescaptcha_api_key)
             config.set_yescaptcha_base_url(captcha_config.yescaptcha_base_url)
+            config.set_yescaptcha_task_type(captcha_config.yescaptcha_task_type)
             config.set_capmonster_api_key(captcha_config.capmonster_api_key)
             config.set_capmonster_base_url(captcha_config.capmonster_base_url)
             config.set_ezcaptcha_api_key(captcha_config.ezcaptcha_api_key)
@@ -1506,6 +1538,10 @@ class Database:
             config.set_remote_browser_base_url(captcha_config.remote_browser_base_url)
             config.set_remote_browser_api_key(captcha_config.remote_browser_api_key)
             config.set_remote_browser_timeout(captcha_config.remote_browser_timeout)
+            config.set_ant_browser_base_url(captcha_config.ant_browser_base_url)
+            config.set_ant_browser_api_key(captcha_config.ant_browser_api_key)
+            config.set_ant_browser_api_header(captcha_config.ant_browser_api_header)
+            config.set_ant_browser_launch_code(captcha_config.ant_browser_launch_code)
 
     # Cache config operations
     async def get_cache_config(self) -> CacheConfig:
@@ -1626,6 +1662,7 @@ class Database:
         captcha_method: str = None,
         yescaptcha_api_key: str = None,
         yescaptcha_base_url: str = None,
+        yescaptcha_task_type: str = None,
         capmonster_api_key: str = None,
         capmonster_base_url: str = None,
         ezcaptcha_api_key: str = None,
@@ -1635,11 +1672,21 @@ class Database:
         remote_browser_base_url: str = None,
         remote_browser_api_key: str = None,
         remote_browser_timeout: int = None,
+        ant_browser_base_url: str = None,
+        ant_browser_api_key: str = None,
+        ant_browser_api_header: str = None,
+        ant_browser_launch_code: str = None,
         browser_proxy_enabled: bool = None,
         browser_proxy_url: str = None,
         browser_count: int = None
     ):
         """Update captcha configuration"""
+        allowed_yescaptcha_task_types = {
+            "RecaptchaV3TaskProxyless",
+            "RecaptchaV3TaskProxylessM1",
+            "RecaptchaV3TaskProxylessM1S7",
+            "RecaptchaV3TaskProxylessM1S9",
+        }
         async with self._connect(write=True) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM captcha_config WHERE id = 1")
@@ -1650,6 +1697,9 @@ class Database:
                 new_method = captcha_method if captcha_method is not None else current.get("captcha_method", "yescaptcha")
                 new_yes_key = yescaptcha_api_key if yescaptcha_api_key is not None else current.get("yescaptcha_api_key", "")
                 new_yes_url = yescaptcha_base_url if yescaptcha_base_url is not None else current.get("yescaptcha_base_url", "https://api.yescaptcha.com")
+                new_yes_task_type = yescaptcha_task_type if yescaptcha_task_type is not None else current.get("yescaptcha_task_type", "RecaptchaV3TaskProxylessM1")
+                if new_yes_task_type not in allowed_yescaptcha_task_types:
+                    new_yes_task_type = "RecaptchaV3TaskProxylessM1"
                 new_cap_key = capmonster_api_key if capmonster_api_key is not None else current.get("capmonster_api_key", "")
                 new_cap_url = capmonster_base_url if capmonster_base_url is not None else current.get("capmonster_base_url", "https://api.capmonster.cloud")
                 new_ez_key = ezcaptcha_api_key if ezcaptcha_api_key is not None else current.get("ezcaptcha_api_key", "")
@@ -1659,28 +1709,38 @@ class Database:
                 new_remote_base_url = remote_browser_base_url if remote_browser_base_url is not None else current.get("remote_browser_base_url", "")
                 new_remote_api_key = remote_browser_api_key if remote_browser_api_key is not None else current.get("remote_browser_api_key", "")
                 new_remote_timeout = remote_browser_timeout if remote_browser_timeout is not None else current.get("remote_browser_timeout", 60)
+                new_ant_base_url = ant_browser_base_url if ant_browser_base_url is not None else current.get("ant_browser_base_url", "")
+                new_ant_api_key = ant_browser_api_key if ant_browser_api_key is not None else current.get("ant_browser_api_key", "")
+                new_ant_api_header = ant_browser_api_header if ant_browser_api_header is not None else current.get("ant_browser_api_header", "X-Ant-Api-Key")
+                new_ant_launch_code = ant_browser_launch_code if ant_browser_launch_code is not None else current.get("ant_browser_launch_code", "")
                 new_proxy_enabled = browser_proxy_enabled if browser_proxy_enabled is not None else current.get("browser_proxy_enabled", False)
                 new_proxy_url = browser_proxy_url if browser_proxy_url is not None else current.get("browser_proxy_url")
                 new_browser_count = browser_count if browser_count is not None else current.get("browser_count", 1)
                 new_remote_timeout = max(5, int(new_remote_timeout)) if new_remote_timeout is not None else 60
+                new_ant_api_header = (new_ant_api_header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
 
                 await db.execute("""
                     UPDATE captcha_config
-                    SET captcha_method = ?, yescaptcha_api_key = ?, yescaptcha_base_url = ?,
+                    SET captcha_method = ?, yescaptcha_api_key = ?, yescaptcha_base_url = ?, yescaptcha_task_type = ?,
                         capmonster_api_key = ?, capmonster_base_url = ?,
                         ezcaptcha_api_key = ?, ezcaptcha_base_url = ?,
                         capsolver_api_key = ?, capsolver_base_url = ?,
                         remote_browser_base_url = ?, remote_browser_api_key = ?, remote_browser_timeout = ?,
+                        ant_browser_base_url = ?, ant_browser_api_key = ?, ant_browser_api_header = ?, ant_browser_launch_code = ?,
                         browser_proxy_enabled = ?, browser_proxy_url = ?, browser_count = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (new_method, new_yes_key, new_yes_url, new_cap_key, new_cap_url,
+                """, (new_method, new_yes_key, new_yes_url, new_yes_task_type, new_cap_key, new_cap_url,
                       new_ez_key, new_ez_url, new_cs_key, new_cs_url,
                       (new_remote_base_url or "").strip(), (new_remote_api_key or "").strip(), new_remote_timeout,
+                      (new_ant_base_url or "").strip(), (new_ant_api_key or "").strip(), new_ant_api_header, (new_ant_launch_code or "").strip(),
                       new_proxy_enabled, new_proxy_url, new_browser_count))
             else:
                 new_method = captcha_method if captcha_method is not None else "yescaptcha"
                 new_yes_key = yescaptcha_api_key if yescaptcha_api_key is not None else ""
                 new_yes_url = yescaptcha_base_url if yescaptcha_base_url is not None else "https://api.yescaptcha.com"
+                new_yes_task_type = yescaptcha_task_type if yescaptcha_task_type is not None else "RecaptchaV3TaskProxylessM1"
+                if new_yes_task_type not in allowed_yescaptcha_task_types:
+                    new_yes_task_type = "RecaptchaV3TaskProxylessM1"
                 new_cap_key = capmonster_api_key if capmonster_api_key is not None else ""
                 new_cap_url = capmonster_base_url if capmonster_base_url is not None else "https://api.capmonster.cloud"
                 new_ez_key = ezcaptcha_api_key if ezcaptcha_api_key is not None else ""
@@ -1690,21 +1750,28 @@ class Database:
                 new_remote_base_url = remote_browser_base_url if remote_browser_base_url is not None else ""
                 new_remote_api_key = remote_browser_api_key if remote_browser_api_key is not None else ""
                 new_remote_timeout = remote_browser_timeout if remote_browser_timeout is not None else 60
+                new_ant_base_url = ant_browser_base_url if ant_browser_base_url is not None else ""
+                new_ant_api_key = ant_browser_api_key if ant_browser_api_key is not None else ""
+                new_ant_api_header = ant_browser_api_header if ant_browser_api_header is not None else "X-Ant-Api-Key"
+                new_ant_launch_code = ant_browser_launch_code if ant_browser_launch_code is not None else ""
                 new_proxy_enabled = browser_proxy_enabled if browser_proxy_enabled is not None else False
                 new_proxy_url = browser_proxy_url
                 new_browser_count = browser_count if browser_count is not None else 1
                 new_remote_timeout = max(5, int(new_remote_timeout))
+                new_ant_api_header = (new_ant_api_header or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
 
                 await db.execute("""
-                    INSERT INTO captcha_config (id, captcha_method, yescaptcha_api_key, yescaptcha_base_url,
+                    INSERT INTO captcha_config (id, captcha_method, yescaptcha_api_key, yescaptcha_base_url, yescaptcha_task_type,
                         capmonster_api_key, capmonster_base_url, ezcaptcha_api_key, ezcaptcha_base_url,
                         capsolver_api_key, capsolver_base_url,
                         remote_browser_base_url, remote_browser_api_key, remote_browser_timeout,
+                        ant_browser_base_url, ant_browser_api_key, ant_browser_api_header, ant_browser_launch_code,
                         browser_proxy_enabled, browser_proxy_url, browser_count)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (new_method, new_yes_key, new_yes_url, new_cap_key, new_cap_url,
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (new_method, new_yes_key, new_yes_url, new_yes_task_type, new_cap_key, new_cap_url,
                       new_ez_key, new_ez_url, new_cs_key, new_cs_url,
                       (new_remote_base_url or "").strip(), (new_remote_api_key or "").strip(), new_remote_timeout,
+                      (new_ant_base_url or "").strip(), (new_ant_api_key or "").strip(), new_ant_api_header, (new_ant_launch_code or "").strip(),
                       new_proxy_enabled, new_proxy_url, new_browser_count))
 
             await db.commit()
