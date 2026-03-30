@@ -1,6 +1,7 @@
 """Generation handler for Flow2API"""
 import asyncio
 import base64
+import contextlib
 import json
 import time
 from typing import Optional, AsyncGenerator, List, Dict, Any
@@ -786,6 +787,10 @@ class GenerationHandler:
         # 防止并发链路复用到上一次请求的指纹上下文
         if hasattr(self.flow_client, "clear_request_fingerprint"):
             self.flow_client.clear_request_fingerprint()
+        if hasattr(self.flow_client, "clear_captcha_resolution"):
+            self.flow_client.clear_captcha_resolution()
+        if hasattr(self.flow_client, "clear_preferred_captcha_method"):
+            self.flow_client.clear_preferred_captcha_method()
 
         # 1. 验证模型
         if model not in MODEL_CONFIG:
@@ -965,11 +970,12 @@ class GenerationHandler:
                 perf_trace["total_ms"] = int(duration * 1000)
                 perf_trace["error"] = error_msg
                 prompt_for_log = prompt if len(prompt) <= 2000 else f"{prompt[:2000]}...(truncated)"
+                captcha_resolution = self.flow_client.get_captcha_resolution() if hasattr(self.flow_client, "get_captcha_resolution") else None
                 await self._log_request(
                     token.id if token else None,
                     request_operation,
                     request_payload,
-                    {"error": error_msg, "performance": perf_trace},
+                    {"error": error_msg, "performance": perf_trace, "captcha_resolution": captcha_resolution},
                     500,
                     duration,
                     log_id=request_log_state.get("id"),
@@ -1010,6 +1016,10 @@ class GenerationHandler:
                 response_data["url"] = response_state["url"]
             if response_state.get("generated_assets"):
                 response_data["generated_assets"] = response_state["generated_assets"]
+            if hasattr(self.flow_client, "get_captcha_resolution"):
+                captcha_resolution = self.flow_client.get_captcha_resolution()
+                if captcha_resolution:
+                    response_data["captcha_resolution"] = captcha_resolution
             image_perf = perf_trace.get("image_generation", {}) if isinstance(perf_trace, dict) else {}
             video_perf = perf_trace.get("video_generation", {}) if isinstance(perf_trace, dict) else {}
             debug_logger.log_info(
@@ -1023,6 +1033,15 @@ class GenerationHandler:
                 f"launch_stagger={image_perf.get('launch_stagger_wait_ms', 0)}ms, "
                 f"video_slot_wait={video_perf.get('slot_wait_ms', 0)}ms"
             )
+            if hasattr(self.flow_client, "get_captcha_resolution"):
+                captcha_resolution = self.flow_client.get_captcha_resolution()
+                if captcha_resolution:
+                    debug_logger.log_info(
+                        f"[CAPTCHA] [{request_id}] requested={captcha_resolution.get('requested_method')}, "
+                        f"used={captcha_resolution.get('used_method')}, "
+                        f"fallback={captcha_resolution.get('fallback_used')}, "
+                        f"attempts={captcha_resolution.get('attempted_methods')}"
+                    )
 
             await self._log_request(
                 token.id,
@@ -1044,11 +1063,12 @@ class GenerationHandler:
             perf_trace["total_ms"] = int(duration * 1000)
             perf_trace["error"] = error_msg
             prompt_for_log = prompt if len(prompt) <= 2000 else f"{prompt[:2000]}...(truncated)"
+            captcha_resolution = self.flow_client.get_captcha_resolution() if hasattr(self.flow_client, "get_captcha_resolution") else None
             await self._log_request(
                 token.id if token else None,
                 request_operation if generation_type else "generate_unknown",
                 request_payload if 'request_payload' in locals() else {"model": model},
-                {"error": error_msg, "performance": perf_trace},
+                {"error": error_msg, "performance": perf_trace, "captcha_resolution": captcha_resolution},
                 499,
                 duration,
                 log_id=request_log_state.get("id"),
@@ -1069,11 +1089,12 @@ class GenerationHandler:
             perf_trace["total_ms"] = int(duration * 1000)
             perf_trace["error"] = error_msg
             prompt_for_log = prompt if len(prompt) <= 2000 else f"{prompt[:2000]}...(truncated)"
+            captcha_resolution = self.flow_client.get_captcha_resolution() if hasattr(self.flow_client, "get_captcha_resolution") else None
             await self._log_request(
                 token.id if token else None,
                 request_operation if generation_type else "generate_unknown",
                 request_payload if 'request_payload' in locals() else {"model": model},
-                {"error": error_msg, "performance": perf_trace},
+                {"error": error_msg, "performance": perf_trace, "captcha_resolution": captcha_resolution},
                 500,
                 duration,
                 log_id=request_log_state.get("id"),
@@ -1084,6 +1105,8 @@ class GenerationHandler:
                 yield self._create_stream_chunk(f"❌ {error_msg}\n")
             yield self._create_error_response(error_msg, status_code=500)
         finally:
+            if hasattr(self.flow_client, "clear_preferred_captcha_method"):
+                self.flow_client.clear_preferred_captcha_method()
             if pending_token_state.get("active") and token and self.load_balancer:
                 await self.load_balancer.release_pending(
                     token.id,
@@ -1119,10 +1142,14 @@ class GenerationHandler:
         if response_state is None:
             response_state = self._create_response_state()
 
+        image_timeout_seconds = max(60, int(getattr(config, "image_timeout", 300) or 300))
+        image_deadline = time.monotonic() + image_timeout_seconds
+
         image_trace: Optional[Dict[str, Any]] = None
         if isinstance(perf_trace, dict):
             image_trace = perf_trace.setdefault("image_generation", {})
             image_trace["input_image_count"] = len(images) if images else 0
+            image_trace["timeout_seconds"] = image_timeout_seconds
 
         # 不在本地等待图片硬并发槽位；请求一到就直接向上游提交。
         normalized_tier = normalize_user_paygate_tier(token.user_paygate_tier)
@@ -1136,6 +1163,14 @@ class GenerationHandler:
             await self._update_request_log_progress(request_log_state, token_id=token.id, status_text="submitting_image", progress=28)
 
         try:
+            def _remaining_image_timeout(stage: str) -> float:
+                remaining = image_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError(
+                        f"图片生成超时: {stage} 阶段超过 {image_timeout_seconds} 秒"
+                    )
+                return remaining
+
             # 上传图片 (如果有)
             upload_started_at = time.time()
             image_inputs = []
@@ -1163,9 +1198,16 @@ class GenerationHandler:
             # 调用生成API
             if stream:
                 if images and len(images) > 0:
-                    yield self._create_stream_chunk("参考图片上传完成，正在进行打码验证...\n")
+                    yield self._create_stream_chunk("参考图片上传完成，准备开始打码验证...\n")
                 else:
-                    yield self._create_stream_chunk("正在进行打码验证并提交图片生成请求...\n")
+                    yield self._create_stream_chunk("准备开始打码验证...\n")
+
+            progress_queue: Optional[asyncio.Queue[str]] = asyncio.Queue() if stream else None
+            progress_state = {"last_status_text": None}
+            progress_messages = {
+                "solving_image_captcha": "正在打码验证...\n",
+                "submitting_image": "验证码通过，正在提交生成请求...\n",
+            }
 
             async def _image_progress_callback(status_text: str, progress: int):
                 await self._update_request_log_progress(
@@ -1174,19 +1216,78 @@ class GenerationHandler:
                     status_text=status_text,
                     progress=progress,
                 )
+                if progress_queue is None:
+                    return
+                normalized_status = str(status_text or "").strip()
+                if not normalized_status or normalized_status == progress_state["last_status_text"]:
+                    return
+                progress_state["last_status_text"] = normalized_status
+                message = progress_messages.get(normalized_status)
+                if message:
+                    await progress_queue.put(message)
 
             generate_started_at = time.time()
-            result, generation_session_id, upstream_trace = await self.flow_client.generate_image(
-                at=token.at,
-                project_id=project_id,
-                prompt=prompt,
-                model_name=model_config["model_name"],
-                aspect_ratio=model_config["aspect_ratio"],
-                image_inputs=image_inputs,
-                token_id=token.id,
-                token_image_concurrency=token.image_concurrency,
-                progress_callback=_image_progress_callback,
-            )
+            try:
+                if progress_queue is not None:
+                    generate_task = asyncio.create_task(
+                        self.flow_client.generate_image(
+                            at=token.at,
+                            project_id=project_id,
+                            prompt=prompt,
+                            model_name=model_config["model_name"],
+                            aspect_ratio=model_config["aspect_ratio"],
+                            image_inputs=image_inputs,
+                            token_id=token.id,
+                            token_image_concurrency=token.image_concurrency,
+                            progress_callback=_image_progress_callback,
+                        )
+                    )
+                    while True:
+                        if generate_task.done():
+                            result, generation_session_id, upstream_trace = await generate_task
+                            break
+                        try:
+                            progress_message = await asyncio.wait_for(
+                                progress_queue.get(),
+                                timeout=min(0.5, _remaining_image_timeout("等待图片生成进度")),
+                            )
+                            yield self._create_stream_chunk(progress_message)
+                        except asyncio.TimeoutError:
+                            if time.monotonic() >= image_deadline:
+                                generate_task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await generate_task
+                                raise asyncio.TimeoutError(
+                                    f"图片生成超时: 提交生成请求阶段超过 {image_timeout_seconds} 秒"
+                                )
+                else:
+                    result, generation_session_id, upstream_trace = await asyncio.wait_for(
+                        self.flow_client.generate_image(
+                            at=token.at,
+                            project_id=project_id,
+                            prompt=prompt,
+                            model_name=model_config["model_name"],
+                            aspect_ratio=model_config["aspect_ratio"],
+                            image_inputs=image_inputs,
+                            token_id=token.id,
+                            token_image_concurrency=token.image_concurrency,
+                            progress_callback=_image_progress_callback,
+                        ),
+                        timeout=_remaining_image_timeout("提交生成请求"),
+                    )
+            except asyncio.TimeoutError as exc:
+                error_msg = str(exc) or f"图片生成超时，超过 {image_timeout_seconds} 秒"
+                self._mark_generation_failed(generation_result, error_msg)
+                await self._update_request_log_progress(
+                    request_log_state,
+                    token_id=token.id,
+                    status_text="image_timeout",
+                    progress=request_log_state.get("progress", 0),
+                )
+                if stream:
+                    yield self._create_stream_chunk(f"❌ {error_msg}\n")
+                yield self._create_error_response(error_msg, status_code=504)
+                return
             if image_trace is not None:
                 image_trace["generate_api_ms"] = int((time.time() - generate_started_at) * 1000)
                 image_trace["upstream_trace"] = upstream_trace

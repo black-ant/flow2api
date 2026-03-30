@@ -32,6 +32,14 @@ class FlowClient:
             "flow_request_fingerprint",
             default=None
         )
+        self._captcha_resolution_ctx: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+            "flow_captcha_resolution",
+            default=None
+        )
+        self._captcha_preferred_method_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+            "flow_captcha_preferred_method",
+            default=None
+        )
 
         # Default "real browser" headers (Android Chrome style) to reduce upstream 4xx/5xx instability.
         # These will be applied as defaults (won't override caller-provided headers).
@@ -136,6 +144,92 @@ class FlowClient:
     def clear_request_fingerprint(self):
         """清理请求链路绑定的浏览器指纹。"""
         self._set_request_fingerprint(None)
+
+    def _set_captcha_resolution(self, resolution: Optional[Dict[str, Any]]):
+        """记录当前请求链路实际使用的打码来源。"""
+        self._captcha_resolution_ctx.set(dict(resolution) if isinstance(resolution, dict) else None)
+
+    def get_captcha_resolution(self) -> Optional[Dict[str, Any]]:
+        """获取当前请求链路实际使用的打码来源。"""
+        resolution = self._captcha_resolution_ctx.get()
+        if not isinstance(resolution, dict) or not resolution:
+            return None
+        return dict(resolution)
+
+    def clear_captcha_resolution(self):
+        """清理当前请求链路打码来源记录。"""
+        self._set_captcha_resolution(None)
+
+    def _set_preferred_captcha_method(self, method: Optional[str]):
+        """设置当前请求后续重试优先使用的打码方式。"""
+        normalized = (method or "").strip().lower()
+        self._captcha_preferred_method_ctx.set(normalized or None)
+
+    def get_preferred_captcha_method(self) -> Optional[str]:
+        """获取当前请求后续重试优先使用的打码方式。"""
+        method = self._captcha_preferred_method_ctx.get()
+        return (method or "").strip().lower() or None
+
+    def clear_preferred_captcha_method(self):
+        """清理当前请求的打码方式切换偏好。"""
+        self._set_preferred_captcha_method(None)
+
+    def _get_configured_api_captcha_methods(self, exclude: Optional[List[str]] = None) -> List[str]:
+        """返回已配置 API Key 的 API 打码方式，按稳定性优先级排序。"""
+        excluded = {item for item in (exclude or []) if item}
+        candidates = [
+            ("yescaptcha", (config.yescaptcha_api_key or "").strip()),
+            ("capsolver", (config.capsolver_api_key or "").strip()),
+            ("ezcaptcha", (config.ezcaptcha_api_key or "").strip()),
+            ("capmonster", (config.capmonster_api_key or "").strip()),
+        ]
+        return [method for method, api_key in candidates if api_key and method not in excluded]
+
+    def _resolve_captcha_fallback_chain(self, primary_method: str) -> List[str]:
+        """为当前打码方式生成自动降级链路。"""
+        normalized_primary = (primary_method or "").strip().lower()
+        fallback_chain: List[str] = []
+
+        if normalized_primary in {"browser", "ant_browser", "remote_browser", "personal"}:
+            fallback_chain.extend(self._get_configured_api_captcha_methods())
+        elif normalized_primary in {"yescaptcha", "capmonster", "ezcaptcha", "capsolver"}:
+            fallback_chain.extend(self._get_configured_api_captcha_methods(exclude=[normalized_primary]))
+
+        deduplicated: List[str] = []
+        for method in fallback_chain:
+            if method and method not in deduplicated:
+                deduplicated.append(method)
+        return deduplicated
+
+    def _resolve_retry_captcha_sequence(self, configured_method: str) -> List[str]:
+        """返回一个请求内发生 reCAPTCHA/403 后的切换顺序。"""
+        normalized = (configured_method or "").strip().lower()
+        sequence: List[str] = []
+        if normalized:
+            sequence.append(normalized)
+        for method in self._resolve_captcha_fallback_chain(normalized):
+            if method not in sequence:
+                sequence.append(method)
+        return sequence
+
+    def _advance_captcha_method_after_failure(self) -> Optional[str]:
+        """当 token 已获取但被上游拒绝时，切到下一种打码方式。"""
+        resolution = self.get_captcha_resolution() or {}
+        configured_method = str(resolution.get("requested_method") or config.captcha_method or "").strip().lower()
+        current_method = str(resolution.get("used_method") or configured_method).strip().lower()
+        sequence = self._resolve_retry_captcha_sequence(configured_method)
+        if not sequence:
+            self.clear_preferred_captcha_method()
+            return None
+
+        try:
+            current_index = sequence.index(current_method)
+        except ValueError:
+            current_index = -1
+
+        next_method = sequence[current_index + 1] if current_index + 1 < len(sequence) else None
+        self._set_preferred_captcha_method(next_method)
+        return next_method
 
     async def _make_request(
         self,
@@ -1886,6 +1980,14 @@ class FlowClient:
             )
             return False
 
+        next_captcha_method = None
+        if retry_reason in {"403错误", "reCAPTCHA 验证失败", "reCAPTCHA 错误"}:
+            next_captcha_method = self._advance_captcha_method_after_failure()
+            if next_captcha_method:
+                debug_logger.log_warning(
+                    f"{log_prefix}检测到上游拒绝当前验证码，下一次重试将切换到 {next_captcha_method}"
+                )
+
         debug_logger.log_warning(
             f"{log_prefix}遇到{retry_reason}，正在重新获取验证码重试 ({retry_attempt + 2}/{max_retries})..."
         )
@@ -2142,60 +2244,123 @@ class FlowClient:
             - remote_browser 模式: browser_id 为远程 session_id
             - 其他模式: browser_id 为 None
         """
-        captcha_method = config.captcha_method
+        configured_captcha_method = (config.captcha_method or "").strip().lower()
+        preferred_captcha_method = self.get_preferred_captcha_method()
+        captcha_method = preferred_captcha_method or configured_captcha_method
+        self._set_captcha_resolution({
+            "requested_method": configured_captcha_method,
+            "used_method": None,
+            "attempted_methods": [],
+            "fallback_used": False,
+        })
+
+        def _record_attempt(method: str):
+            resolution = self.get_captcha_resolution() or {
+                "requested_method": configured_captcha_method,
+                "used_method": None,
+                "attempted_methods": [],
+                "fallback_used": False,
+            }
+            attempts = list(resolution.get("attempted_methods") or [])
+            if method not in attempts:
+                attempts.append(method)
+            resolution["attempted_methods"] = attempts
+            self._set_captcha_resolution(resolution)
+
+        def _record_success(method: str, fallback_used: bool):
+            resolution = self.get_captcha_resolution() or {}
+            attempts = list(resolution.get("attempted_methods") or [])
+            if method not in attempts:
+                attempts.append(method)
+            resolution["requested_method"] = configured_captcha_method
+            resolution["used_method"] = method
+            resolution["attempted_methods"] = attempts
+            resolution["fallback_used"] = fallback_used
+            self._set_captcha_resolution(resolution)
+            self._set_preferred_captcha_method(method)
+
+        async def _try_api_fallback_methods(exclude: Optional[List[str]] = None) -> tuple[Optional[str], Optional[Union[int, str]]]:
+            fallback_methods = self._resolve_captcha_fallback_chain(configured_captcha_method)
+            if exclude:
+                fallback_methods = [method for method in fallback_methods if method not in set(exclude)]
+
+            for fallback_method in fallback_methods:
+                _record_attempt(fallback_method)
+                debug_logger.log_warning(
+                    f"[reCAPTCHA] 主打码方式 {configured_captcha_method} 不可用，自动降级到 {fallback_method}"
+                )
+                self._set_request_fingerprint(None)
+                token = await self._get_api_captcha_token(fallback_method, project_id, action)
+                if token:
+                    _record_success(fallback_method, fallback_used=(fallback_method != configured_captcha_method))
+                    debug_logger.log_info(
+                        f"[reCAPTCHA] 已切换到降级打码方式 {fallback_method}"
+                    )
+                    return token, None
+
+            return None, None
 
         # 内置浏览器打码 (nodriver)
         if captcha_method == "personal":
             try:
+                _record_attempt("personal")
                 from .browser_captcha_personal import BrowserCaptchaService
                 service = await BrowserCaptchaService.get_instance(self.db)
                 token = await service.get_token(project_id, action)
                 fingerprint = service.get_last_fingerprint() if token else None
                 self._set_request_fingerprint(fingerprint if token else None)
-                return token, None
+                if token:
+                    _record_success("personal", fallback_used=False)
+                    return token, None
+                return await _try_api_fallback_methods(exclude=["personal"])
             except RuntimeError as e:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)
                 debug_logger.log_error(f"[reCAPTCHA Personal] {error_msg}")
                 print(f"[reCAPTCHA] [ERROR] 内置浏览器打码失败: {error_msg}")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=["personal"])
             except ImportError as e:
                 debug_logger.log_error(f"[reCAPTCHA Personal] 导入失败: {str(e)}")
                 print(f"[reCAPTCHA] [ERROR] nodriver 未安装，请运行: pip install nodriver")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=["personal"])
             except Exception as e:
                 debug_logger.log_error(f"[reCAPTCHA Personal] 错误: {str(e)}")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=["personal"])
         # 有头浏览器打码 (playwright)
         elif captcha_method in {"browser", "ant_browser"}:
             try:
+                _record_attempt(captcha_method)
                 from .browser_captcha import BrowserCaptchaService
                 service = await BrowserCaptchaService.get_instance(self.db)
                 token, browser_id = await service.get_token(project_id, action, token_id=token_id)
                 fingerprint = await service.get_fingerprint(browser_id) if token else None
                 self._set_request_fingerprint(fingerprint if token else None)
-                return token, browser_id
+                if token:
+                    _record_success(captcha_method, fallback_used=False)
+                    return token, browser_id
+                return await _try_api_fallback_methods(exclude=[captcha_method])
             except RuntimeError as e:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)
                 debug_logger.log_error(f"[reCAPTCHA {captcha_method}] {error_msg}")
                 print(f"[reCAPTCHA] [ERROR] {captcha_method} 打码失败: {error_msg}")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=[captcha_method])
             except ImportError as e:
                 debug_logger.log_error(f"[reCAPTCHA {captcha_method}] 导入失败: {str(e)}")
                 print(f"[reCAPTCHA] [ERROR] playwright 未安装，请运行: pip install playwright")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=[captcha_method])
             except Exception as e:
                 debug_logger.log_error(f"[reCAPTCHA {captcha_method}] 错误: {str(e)}")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=[captcha_method])
         elif captcha_method == "remote_browser":
             try:
+                _record_attempt("remote_browser")
                 solve_timeout = self._resolve_remote_browser_solve_timeout(action)
                 payload = await self._call_remote_browser_service(
                     method="POST",
@@ -2213,20 +2378,25 @@ class FlowClient:
                 self._set_request_fingerprint(fingerprint if token else None)
                 if not token or not session_id:
                     raise RuntimeError(f"remote_browser 返回缺少 token/session_id: {payload}")
+                _record_success("remote_browser", fallback_used=False)
                 return token, str(session_id)
             except Exception as e:
                 debug_logger.log_error(f"[reCAPTCHA RemoteBrowser] 错误: {str(e)}")
                 self._set_request_fingerprint(None)
-                return None, None
+                return await _try_api_fallback_methods(exclude=["remote_browser"])
         # API打码服务
         elif captcha_method in ["yescaptcha", "capmonster", "ezcaptcha", "capsolver"]:
             self._set_request_fingerprint(None)
+            _record_attempt(captcha_method)
             token = await self._get_api_captcha_token(captcha_method, project_id, action)
-            return token, None
+            if token:
+                _record_success(captcha_method, fallback_used=False)
+                return token, None
+            return await _try_api_fallback_methods(exclude=[captcha_method])
         else:
             debug_logger.log_info(f"[reCAPTCHA] 未知的打码方式: {captcha_method}")
             self._set_request_fingerprint(None)
-            return None, None
+            return await _try_api_fallback_methods()
 
     async def _get_api_captcha_token(self, method: str, project_id: str, action: str = "IMAGE_GENERATION") -> Optional[str]:
         """通用API打码服务

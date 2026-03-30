@@ -33,6 +33,10 @@
                         <label for="password" class="text-sm font-medium">密码</label>
                         <input type="password" id="password" name="password" required class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" placeholder="请输入密码">
                     </div>
+                    <label class="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input type="checkbox" id="rememberLogin" class="h-4 w-4 rounded border border-input" checked>
+                        <span>记住账号和密码</span>
+                    </label>
                     <button type="submit" id="loginButton" class="inline-flex items-center justify-center rounded-md font-medium transition-colors bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-full disabled:opacity-50">登录</button>
                 </form>
 
@@ -44,10 +48,13 @@
     </div>
 
     <script>
-        const form=document.getElementById('loginForm'),btn=document.getElementById('loginButton');
-        form.addEventListener('submit',async(e)=>{e.preventDefault();btn.disabled=true;btn.textContent='登录中...';try{const fd=new FormData(form),r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})});const d=await r.json();d.success?(localStorage.setItem('adminToken',d.token),location.href='/manage'):showToast(d.message||'登录失败','error')}catch(e){showToast('网络错误,请稍后重试','error')}finally{btn.disabled=false;btn.textContent='登录'}});
+        const form=document.getElementById('loginForm'),btn=document.getElementById('loginButton'),usernameInput=document.getElementById('username'),passwordInput=document.getElementById('password'),rememberInput=document.getElementById('rememberLogin');
+        const REMEMBER_KEY='adminLoginRemembered';
+        const loadRememberedLogin=()=>{try{const raw=localStorage.getItem(REMEMBER_KEY);if(!raw)return;const saved=JSON.parse(raw);if(saved&&saved.username){usernameInput.value=String(saved.username||'');passwordInput.value=String(saved.password||'');rememberInput.checked=true}}catch(_e){}};
+        const persistRememberedLogin=(username,password)=>{if(rememberInput.checked){localStorage.setItem(REMEMBER_KEY,JSON.stringify({username,password}))}else{localStorage.removeItem(REMEMBER_KEY)}};
+        form.addEventListener('submit',async(e)=>{e.preventDefault();btn.disabled=true;btn.textContent='登录中...';try{const fd=new FormData(form),username=String(fd.get('username')||''),password=String(fd.get('password')||''),r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});const d=await r.json();d.success?(persistRememberedLogin(username,password),localStorage.setItem('adminToken',d.token),location.href='/manage'):showToast(d.message||'登录失败','error')}catch(e){showToast('网络错误,请稍后重试','error')}finally{btn.disabled=false;btn.textContent='登录'}});
         function showToast(m,t='error'){const d=document.createElement('div'),bc={success:'bg-green-600',error:'bg-destructive',info:'bg-primary'};d.className=`fixed bottom-4 right-4 ${bc[t]||bc.error} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;d.textContent=m;document.body.appendChild(d);setTimeout(()=>{d.style.opacity='0';d.style.transition='opacity .3s';setTimeout(()=>d.parentNode&&document.body.removeChild(d),300)},2000)}
-        window.addEventListener('DOMContentLoaded',()=>{const t=localStorage.getItem('adminToken');t&&fetch('/api/stats',{headers:{Authorization:`Bearer ${t}`}}).then(r=>{if(r.ok)location.href='/manage'})});
+        window.addEventListener('DOMContentLoaded',()=>{loadRememberedLogin();const t=localStorage.getItem('adminToken');t&&fetch('/api/stats',{headers:{Authorization:`Bearer ${t}`}}).then(r=>{if(r.ok)location.href='/manage'})});
     </script>
 </body>
 </html>

@@ -511,6 +511,7 @@
                         <button onclick="saveCaptchaConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">保存配置</button>
                     </div>
                     <p id="captchaScoreTestResult" class="text-xs text-muted-foreground mt-2">测试目标：<code class="bg-muted px-1 py-0.5 rounded">https://antcpt.com/score_detector/</code></p>
+                    <p class="text-xs text-amber-700 mt-2">分数测试只代表测试站点下的 token 质量，不等于 Google Flow 的真实图片生成一定会通过；真实链路还会受站点、action、enterprise 校验、UA、客户端提示头、代理出口一致性影响。</p>
                 </div>
 
                 <!-- 调试配置 -->
@@ -969,6 +970,18 @@
             return responseBodyObj.status==='success'?'生成成功':'生成成功，已返回结果';
         }
 
+        function renderCaptchaResolution(responseBodyObj){
+            const resolution=responseBodyObj&&typeof responseBodyObj==='object'&&responseBodyObj.captcha_resolution&&typeof responseBodyObj.captcha_resolution==='object'
+                ?responseBodyObj.captcha_resolution
+                :null;
+            if(!resolution) return '';
+            const requested=String(resolution.requested_method||'-');
+            const used=String(resolution.used_method||'-');
+            const fallback=resolution.fallback_used===true?'是':'否';
+            const attempts=Array.isArray(resolution.attempted_methods)&&resolution.attempted_methods.length?resolution.attempted_methods.join(' -> '):'-';
+            return `<div class="space-y-2"><h4 class="font-medium text-sm">打码链路</h4><div class="rounded-md border border-border p-3 bg-muted/30 space-y-1 text-sm"><div><span class="text-muted-foreground">请求方式:</span> ${escapeLogHtml(requested)}</div><div><span class="text-muted-foreground">实际使用:</span> ${escapeLogHtml(used)}</div><div><span class="text-muted-foreground">发生降级:</span> ${escapeLogHtml(fallback)}</div><div><span class="text-muted-foreground">尝试顺序:</span> ${escapeLogHtml(attempts)}</div></div></div>`;
+        }
+
         function formatLogPayload(raw){
             const parsed=parseLogJson(raw);
             if(parsed){
@@ -1120,6 +1133,7 @@
                 if(successSummary){
                     detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-green-700">结果摘要</h4><div class="rounded-md border border-green-200 p-3 bg-green-50"><p class="text-sm text-green-700">${escapeLogHtml(successSummary)}</p></div></div>`;
                 }
+                detailHtml+=renderCaptchaResolution(responseBodyObj);
                 if(responseBodyObj){
                     const directUrl=extractLogPrimaryUrl(responseBodyObj);
                     if(directUrl){
@@ -1160,6 +1174,7 @@
                 if(errorSummary){
                     detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-red-600">错误原因</h4><div class="rounded-md border border-red-200 p-3 bg-red-50"><p class="text-sm text-red-700 break-all">${escapeLogHtml(errorSummary)}</p></div></div>`;
                 }
+                detailHtml+=renderCaptchaResolution(responseBodyObj);
                 detailHtml+=`<div class="space-y-2"><h4 class="font-medium text-sm text-red-600">错误响应</h4><pre class="rounded-md border border-red-200 p-3 bg-red-50 text-xs overflow-x-auto">${escapeLogHtml(responsePayloadText)}</pre></div>`;
             }
 
