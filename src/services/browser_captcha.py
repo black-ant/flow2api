@@ -69,7 +69,7 @@ def _ensure_playwright_installed() -> bool:
         return True
     except ImportError:
         debug_logger.log_error("[BrowserCaptcha] playwright 未安装，请手动安装: pip install playwright")
-        print("[BrowserCaptcha] ❌ playwright 未安装，请手动安装: pip install playwright")
+        print("[BrowserCaptcha] [ERROR] playwright 未安装，请手动安装: pip install playwright")
         return False
 
 
@@ -118,7 +118,7 @@ def _ensure_local_browser_ready() -> bool:
         "[BrowserCaptcha] 未配置 ant-chrome，且未提供 BROWSER_EXECUTABLE_PATH。"
         "browser 模式将无法启动本地浏览器。"
     )
-    print("[BrowserCaptcha] ⚠️ 未配置 ant-chrome，且未提供 BROWSER_EXECUTABLE_PATH")
+    print("[BrowserCaptcha] [WARN] 未配置 ant-chrome，且未提供 BROWSER_EXECUTABLE_PATH")
     print("[BrowserCaptcha] 请配置 ant_browser_* 或设置 BROWSER_EXECUTABLE_PATH")
     return False
 
@@ -134,7 +134,7 @@ if DOCKER_HEADED_BLOCKED:
         "[BrowserCaptcha] 检测到 Docker 环境，默认禁用有头浏览器打码。"
         "如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb。"
     )
-    print("[BrowserCaptcha] ⚠️ 检测到 Docker 环境，默认禁用有头浏览器打码")
+    print("[BrowserCaptcha] [WARN] 检测到 Docker 环境，默认禁用有头浏览器打码")
     print("[BrowserCaptcha] 如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb")
 else:
     if IS_DOCKER and ALLOW_DOCKER_HEADED:
@@ -149,7 +149,7 @@ else:
             _ensure_local_browser_ready()
         except ImportError as e:
             debug_logger.log_error(f"[BrowserCaptcha] playwright 导入失败: {e}")
-            print(f"[BrowserCaptcha] ❌ playwright 导入失败: {e}")
+            print(f"[BrowserCaptcha] [ERROR] playwright 导入失败: {e}")
 
 
 # 配置

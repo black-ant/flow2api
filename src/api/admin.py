@@ -2,7 +2,7 @@
 import asyncio
 import json
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import secrets
@@ -13,9 +13,11 @@ from curl_cffi.requests import AsyncSession
 from ..core.auth import AuthManager
 from ..core.database import Database
 from ..core.config import config
+from ..core.model_resolver import get_base_model_aliases
 from ..services.token_manager import TokenManager
 from ..services.proxy_manager import ProxyManager
 from ..services.concurrency_manager import ConcurrencyManager
+from ..services.generation_handler import MODEL_CONFIG
 
 router = APIRouter()
 
@@ -235,7 +237,7 @@ async def _resolve_score_test_verify_proxy(
     返回: (proxies, used, source, proxy_url)
     """
     # 浏览器打码模式优先使用 browser_proxy，确保与取 token 出口一致
-    if captcha_method in {"browser", "personal"} and browser_proxy_enabled and browser_proxy_url:
+    if captcha_method in {"browser", "ant_browser", "personal"} and browser_proxy_enabled and browser_proxy_url:
         proxy_map = _build_proxy_map(browser_proxy_url)
         if proxy_map:
             return proxy_map, True, "captcha_browser_proxy", browser_proxy_url
@@ -374,6 +376,416 @@ async def _score_test_with_remote_browser_service(
     return response_payload
 
 
+def _build_diagnostic_step(
+    key: str,
+    title: str,
+    status: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = {
+        "key": key,
+        "title": title,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def _sanitize_ant_browser_base_url(base_url: str) -> str:
+    value = (base_url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return value
+    if not parsed.scheme or not parsed.netloc:
+        return value
+    host = parsed.hostname or ""
+    if host in {"0.0.0.0", "::"}:
+        host = config.server_display_host if parsed.scheme.startswith("http") else "127.0.0.1"
+    port_part = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{host}{port_part}"
+
+
+def _build_ant_browser_summary_payload(captcha_config: Any) -> Dict[str, Any]:
+    captcha_method = (getattr(captcha_config, "captcha_method", "") or "").strip().lower()
+    base_url = (getattr(captcha_config, "ant_browser_base_url", "") or "").strip()
+    launch_code = (getattr(captcha_config, "ant_browser_launch_code", "") or "").strip()
+    api_key = (getattr(captcha_config, "ant_browser_api_key", "") or "").strip()
+    api_header = (getattr(captcha_config, "ant_browser_api_header", "") or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
+    browser_proxy_enabled = bool(getattr(captcha_config, "browser_proxy_enabled", False))
+    browser_proxy_url = (getattr(captcha_config, "browser_proxy_url", "") or "").strip()
+
+    return {
+        "success": True,
+        "summary": {
+            "captcha_method": captcha_method,
+            "expected_method": "ant_browser",
+            "is_ant_browser_mode": captcha_method == "ant_browser",
+            "base_url": _sanitize_ant_browser_base_url(base_url),
+            "base_url_configured": bool(base_url),
+            "launch_code_configured": bool(launch_code),
+            "api_key_configured": bool(api_key),
+            "api_header": api_header,
+            "browser_proxy_enabled": browser_proxy_enabled,
+            "browser_proxy_configured": bool(browser_proxy_url),
+            "ready_for_diagnose": captcha_method == "ant_browser" and bool(base_url and launch_code),
+        },
+    }
+
+
+def _build_generation_playground_config_payload(admin_config: Any) -> Dict[str, Any]:
+    openai_models = []
+    gemini_models = []
+
+    for model_id, model_config in MODEL_CONFIG.items():
+        item = {
+            "id": model_id,
+            "type": model_config.get("type"),
+            "supports_images": bool(model_config.get("supports_images", False) or model_config.get("type") == "image"),
+        }
+        openai_models.append(item)
+
+    for alias_id in get_base_model_aliases().keys():
+        gemini_type = "video" if alias_id.startswith("veo_") else "image"
+        gemini_models.append(
+            {
+                "id": alias_id,
+                "type": gemini_type,
+                "supports_images": gemini_type == "image" or "_i2v_" in alias_id or alias_id.endswith("_fl"),
+            }
+        )
+
+    return {
+        "success": True,
+        "config": {
+            "base_url": f"http://{config.server_display_host}:{config.server_port}",
+            "api_key": getattr(admin_config, "api_key", "") or "",
+            "openai_models": openai_models,
+            "gemini_models": gemini_models,
+            "default_openai_image_model": "gemini-3.1-flash-image-landscape",
+            "default_openai_video_model": "veo_2_1_fast_d_15_t2v_landscape",
+            "default_gemini_image_model": "gemini-3.1-flash-image",
+            "default_gemini_video_model": "veo_2_1_fast_d_15_t2v_landscape",
+        },
+    }
+
+
+async def _run_ant_browser_diagnostics(
+    request: "AntBrowserDiagnosticsRunRequest",
+    emit_step: Optional[Any] = None,
+) -> Dict[str, Any]:
+    captcha_config = await db.get_captcha_config()
+    summary_payload = _build_ant_browser_summary_payload(captcha_config)
+    summary = summary_payload["summary"]
+    started_at = time.time()
+    steps: List[Dict[str, Any]] = []
+
+    async def push_step(step: Dict[str, Any]) -> None:
+        steps.append(step)
+        if emit_step is not None:
+            await emit_step(step)
+
+    website_url = (request.website_url or "https://antcpt.com/score_detector/").strip()
+    website_key = (request.website_key or "6LcR_okUAAAAAPYrPe-HK_0RULO1aZM15ENyM-Mf").strip()
+    action = (request.action or "homepage").strip()
+    verify_url = (request.verify_url or "https://antcpt.com/score_detector/verify.php").strip()
+    enterprise = bool(request.enterprise)
+
+    if summary["captcha_method"] != "ant_browser":
+        await push_step(
+            _build_diagnostic_step(
+                "config_check",
+                "配置检查",
+                "error",
+                "当前打码方式不是 ant_browser",
+                {"captcha_method": summary["captcha_method"]},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "config_check",
+            "message": "请先将打码方式切换为 ant_browser",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    missing_fields = []
+    if not summary["base_url_configured"]:
+        missing_fields.append("ant_browser_base_url")
+    if not summary["launch_code_configured"]:
+        missing_fields.append("ant_browser_launch_code")
+
+    if missing_fields:
+        await push_step(
+            _build_diagnostic_step(
+                "config_check",
+                "配置检查",
+                "error",
+                f"缺少必要配置: {', '.join(missing_fields)}",
+                {"missing_fields": missing_fields},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "config_check",
+            "message": "ant-chrome 配置不完整",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    await push_step(
+        _build_diagnostic_step(
+            "config_check",
+            "配置检查",
+            "success",
+            "已检测到 ant-chrome 服务地址和启动码",
+            {
+                "base_url": summary["base_url"],
+                "api_key_configured": summary["api_key_configured"],
+                "browser_proxy_enabled": summary["browser_proxy_enabled"],
+            },
+        )
+    )
+
+    base_url = _normalize_http_base_url(getattr(captcha_config, "ant_browser_base_url", ""))
+    api_key = (getattr(captcha_config, "ant_browser_api_key", "") or "").strip()
+    api_header = (getattr(captcha_config, "ant_browser_api_header", "") or "X-Ant-Api-Key").strip() or "X-Ant-Api-Key"
+    launch_code = (getattr(captcha_config, "ant_browser_launch_code", "") or "").strip()
+    timeout = max(5, int(getattr(captcha_config, "remote_browser_timeout", None) or config.remote_browser_timeout or 60))
+    launch_url = f"{base_url}/api/launch"
+    launch_headers = {
+        "Accept": "application/json",
+    }
+    if api_key:
+        launch_headers[api_header] = api_key
+
+    try:
+        status_code, response_payload, response_text = await _sync_json_http_request(
+            method="POST",
+            url=launch_url,
+            headers=launch_headers,
+            payload={"code": launch_code},
+            timeout=timeout,
+        )
+    except Exception as e:
+        await push_step(
+            _build_diagnostic_step(
+                "launch_server",
+                "服务连通性检查",
+                "error",
+                f"无法连接 ant-chrome LaunchServer: {str(e)}",
+                {"launch_url": launch_url},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "launch_server",
+            "message": "LaunchServer 连通性检查失败",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    if status_code >= 400:
+        detail = _extract_error_summary(response_payload) or (response_text or "").strip() or f"HTTP {status_code}"
+        await push_step(
+            _build_diagnostic_step(
+                "launch_server",
+                "服务连通性检查",
+                "error",
+                f"LaunchServer 返回异常: {detail}",
+                {"http_status": status_code},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "launch_server",
+            "message": "LaunchServer 请求失败",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    await push_step(
+        _build_diagnostic_step(
+            "launch_server",
+            "服务连通性检查",
+            "success",
+            "已成功连接 ant-chrome LaunchServer",
+            {"http_status": status_code},
+        )
+    )
+
+    launch_payload = response_payload if isinstance(response_payload, dict) else {}
+    cdp_url = str(launch_payload.get("cdpUrl") or "").strip()
+    if not cdp_url:
+        await push_step(
+            _build_diagnostic_step(
+                "launch_browser",
+                "启动参数检查",
+                "error",
+                "LaunchServer 未返回 cdpUrl",
+                {"response_preview": _truncate_text(response_text, 300)},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "launch_browser",
+            "message": "启动参数检查失败",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    await push_step(
+        _build_diagnostic_step(
+            "launch_browser",
+            "启动参数检查",
+            "success",
+            "LaunchServer 已返回可用的浏览器连接地址",
+            {
+                "profile_name": launch_payload.get("profileName") or launch_payload.get("profileId") or "",
+                "cdp_url_preview": _truncate_text(cdp_url, 120),
+            },
+        )
+    )
+
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.connect_over_cdp(cdp_url)
+            try:
+                contexts = list(getattr(browser, "contexts", []))
+                context = contexts[0] if contexts else await browser.new_context(locale="en-US")
+                page = await context.new_page()
+                await page.goto("about:blank", wait_until="load", timeout=15000)
+                await page.close()
+            finally:
+                await browser.close()
+    except Exception as e:
+        await push_step(
+            _build_diagnostic_step(
+                "connect_browser",
+                "浏览器连接检查",
+                "error",
+                f"已获取 cdpUrl，但无法连接浏览器实例: {str(e)}",
+                {"cdp_url_preview": _truncate_text(cdp_url, 120)},
+            )
+        )
+        return {
+            "success": False,
+            "stage": "connect_browser",
+            "message": "浏览器连接检查失败",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    await push_step(
+        _build_diagnostic_step(
+            "connect_browser",
+            "浏览器连接检查",
+            "success",
+            "已建立 CDP 连接，浏览器实例可用",
+        )
+    )
+
+    try:
+        from ..services.browser_captcha import BrowserCaptchaService
+
+        service = await BrowserCaptchaService.get_instance(db)
+        score_payload, browser_id = await service.get_custom_score(
+            website_url=website_url,
+            website_key=website_key,
+            verify_url=verify_url,
+            action=action,
+            enterprise=enterprise,
+        )
+        fingerprint = await service.get_fingerprint(browser_id)
+    except Exception as e:
+        await push_step(
+            _build_diagnostic_step(
+                "score_test",
+                "打码分数测试",
+                "error",
+                f"浏览器已可连接，但打码分数测试失败: {str(e)}",
+            )
+        )
+        return {
+            "success": False,
+            "stage": "score_test",
+            "message": "打码分数测试失败",
+            "summary": summary,
+            "steps": steps,
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    verify_result = score_payload.get("verify_result") if isinstance(score_payload, dict) else {}
+    token_value = (score_payload or {}).get("token") if isinstance(score_payload, dict) else None
+    score = verify_result.get("score") if isinstance(verify_result, dict) else None
+    hostname = verify_result.get("hostname") if isinstance(verify_result, dict) else None
+    resolved_action = verify_result.get("action") if isinstance(verify_result, dict) else None
+
+    if not token_value:
+        await push_step(
+            _build_diagnostic_step(
+                "score_test",
+                "打码分数测试",
+                "error",
+                "未获取到有效的 reCAPTCHA token",
+                {
+                    "verify_result": verify_result if isinstance(verify_result, dict) else {},
+                },
+            )
+        )
+        return {
+            "success": False,
+            "stage": "score_test",
+            "message": "未获取到有效 token",
+            "summary": summary,
+            "steps": steps,
+            "verify_result": verify_result if isinstance(verify_result, dict) else {},
+            "elapsed_ms": int((time.time() - started_at) * 1000),
+        }
+
+    await push_step(
+        _build_diagnostic_step(
+            "score_test",
+            "打码分数测试",
+            "success",
+            f"分数测试成功，score={score if score is not None else '-'}",
+            {
+                "score": score,
+                "action": resolved_action or action,
+                "hostname": hostname,
+                "token_elapsed_ms": (score_payload or {}).get("token_elapsed_ms"),
+                "verify_elapsed_ms": (score_payload or {}).get("verify_elapsed_ms"),
+            },
+        )
+    )
+
+    return {
+        "success": True,
+        "stage": "completed",
+        "message": "ant-chrome 配置可用",
+        "summary": summary,
+        "steps": steps,
+        "verify_result": verify_result if isinstance(verify_result, dict) else {},
+        "fingerprint": fingerprint if isinstance(fingerprint, dict) else None,
+        "token_elapsed_ms": (score_payload or {}).get("token_elapsed_ms"),
+        "verify_elapsed_ms": (score_payload or {}).get("verify_elapsed_ms"),
+        "elapsed_ms": int((time.time() - started_at) * 1000),
+    }
+
+
 def set_dependencies(tm: TokenManager, pm: ProxyManager, database: Database, cm: Optional[ConcurrencyManager] = None):
     """Set service instances"""
     global token_manager, proxy_manager, db, concurrency_manager
@@ -428,6 +840,14 @@ class ProxyTestRequest(BaseModel):
 
 
 class CaptchaScoreTestRequest(BaseModel):
+    website_url: Optional[str] = "https://antcpt.com/score_detector/"
+    website_key: Optional[str] = "6LcR_okUAAAAAPYrPe-HK_0RULO1aZM15ENyM-Mf"
+    action: Optional[str] = "homepage"
+    verify_url: Optional[str] = "https://antcpt.com/score_detector/verify.php"
+    enterprise: Optional[bool] = False
+
+
+class AntBrowserDiagnosticsRunRequest(BaseModel):
     website_url: Optional[str] = "https://antcpt.com/score_detector/"
     website_key: Optional[str] = "6LcR_okUAAAAAPYrPe-HK_0RULO1aZM15ENyM-Mf"
     action: Optional[str] = "homepage"
@@ -1569,6 +1989,79 @@ async def get_captcha_config(token: str = Depends(verify_admin_token)):
     }
 
 
+@router.get("/api/diagnostics/ant-browser/summary")
+async def get_ant_browser_diagnostics_summary(token: str = Depends(verify_admin_token)):
+    """Get ant-browser diagnostics summary."""
+    captcha_config = await db.get_captcha_config()
+    return _build_ant_browser_summary_payload(captcha_config)
+
+
+@router.get("/api/playground/config")
+async def get_generation_playground_config(token: str = Depends(verify_admin_token)):
+    """Get request playground configuration."""
+    admin_config = await db.get_admin_config()
+    return _build_generation_playground_config_payload(admin_config)
+
+
+@router.post("/api/diagnostics/ant-browser/run")
+async def run_ant_browser_diagnostics(
+    request: Optional[AntBrowserDiagnosticsRunRequest] = None,
+    token: str = Depends(verify_admin_token)
+):
+    """Run ant-browser diagnostics."""
+    req = request or AntBrowserDiagnosticsRunRequest()
+    return await _run_ant_browser_diagnostics(req)
+
+
+@router.post("/api/diagnostics/ant-browser/run-stream")
+async def stream_ant_browser_diagnostics(
+    request: Optional[AntBrowserDiagnosticsRunRequest] = None,
+    token: str = Depends(verify_admin_token)
+):
+    """Run ant-browser diagnostics and stream step events as NDJSON."""
+    req = request or AntBrowserDiagnosticsRunRequest()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def emit_step(step: Dict[str, Any]) -> None:
+        await queue.put({"type": "step", "data": step})
+
+    async def runner() -> None:
+        try:
+            result = await _run_ant_browser_diagnostics(req, emit_step=emit_step)
+            await queue.put({"type": "result", "data": result})
+        except Exception as e:
+            await queue.put({
+                "type": "result",
+                "data": {
+                    "success": False,
+                    "stage": "internal_error",
+                    "message": str(e),
+                    "steps": [],
+                },
+            })
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(runner())
+
+    async def stream():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
 @router.post("/api/captcha/score-test")
 async def test_captcha_score(
     request: Optional[CaptchaScoreTestRequest] = None,
@@ -1599,12 +2092,12 @@ async def test_captcha_score(
     verify_proxy_source = "none"
     verify_proxy_url = ""
     verify_impersonate = "chrome120"
-    page_verify_only = captcha_method in {"browser", "personal", "remote_browser"}
+    page_verify_only = captcha_method in {"browser", "ant_browser", "personal", "remote_browser"}
     verify_mode = "browser_page" if page_verify_only else "server_post"
 
     try:
         token_start = time.time()
-        if captcha_method == "browser":
+        if captcha_method in {"browser", "ant_browser"}:
             from ..services.browser_captcha import BrowserCaptchaService
             service = await BrowserCaptchaService.get_instance(db)
             score_payload, browser_id = await service.get_custom_score(
@@ -1889,13 +2382,9 @@ async def get_plugin_config(request: Request, token: str = Depends(verify_admin_
     else:
         # Fallback to config-based URL
         from ..core.config import config
-        server_host = config.server_host
-        server_port = config.server_port
-
-        if server_host == "0.0.0.0":
-            connection_url = f"http://127.0.0.1:{server_port}/api/plugin/update-token"
-        else:
-            connection_url = f"http://{server_host}:{server_port}/api/plugin/update-token"
+        connection_url = (
+            f"http://{config.server_display_host}:{config.server_port}/api/plugin/update-token"
+        )
 
     return {
         "success": True,

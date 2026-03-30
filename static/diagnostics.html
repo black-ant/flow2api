@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>打码诊断 - Flow2API</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes slide-up{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
+        .animate-slide-up{animation:slide-up .25s ease-out}
+        .chat-scroll::-webkit-scrollbar{width:10px}
+        .chat-scroll::-webkit-scrollbar-thumb{background:rgba(15,23,42,.16);border-radius:999px}
+        .chat-scroll::-webkit-scrollbar-track{background:transparent}
+    </style>
+    <script>
+        tailwind.config={theme:{extend:{colors:{border:"hsl(0 0% 89%)",input:"hsl(0 0% 89%)",ring:"hsl(0 0% 3.9%)",background:"hsl(0 0% 100%)",foreground:"hsl(0 0% 3.9%)",primary:{DEFAULT:"hsl(0 0% 9%)",foreground:"hsl(0 0% 98%)"},secondary:{DEFAULT:"hsl(0 0% 96.1%)",foreground:"hsl(0 0% 9%)"},muted:{DEFAULT:"hsl(0 0% 96.1%)",foreground:"hsl(0 0% 45.1%)"},destructive:{DEFAULT:"hsl(0 84.2% 60.2%)",foreground:"hsl(0 0% 98%)"}}}}}
+    </script>
+</head>
+<body class="h-full bg-stone-100 text-foreground antialiased">
+    <div class="min-h-full">
+        <header class="sticky top-0 z-40 border-b border-black/5 bg-white/90 backdrop-blur">
+            <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+                <div>
+                    <h1 class="text-lg font-semibold tracking-tight">打码诊断</h1>
+                    <p class="text-xs text-muted-foreground">使用当前保存的 ant-chrome 配置做逐步连通性检查</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="modeBadge" class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">读取中</span>
+                    <a href="/manage" class="inline-flex items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent">返回管理页</a>
+                </div>
+            </div>
+        </header>
+
+        <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+            <div class="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+                <aside class="space-y-4">
+                    <div class="rounded-2xl border border-black/5 bg-white p-5 shadow-sm">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h2 class="text-sm font-semibold text-slate-900">当前配置摘要</h2>
+                                <p class="mt-1 text-xs text-muted-foreground">该页面只读显示，不在这里修改配置</p>
+                            </div>
+                            <button id="btnRefreshSummary" class="inline-flex items-center justify-center rounded-md border border-input bg-background px-3 py-2 text-xs hover:bg-accent">刷新</button>
+                        </div>
+                        <div class="mt-4 space-y-3 text-sm">
+                            <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                <div class="text-xs text-muted-foreground">当前打码方式</div>
+                                <div id="summaryMethod" class="mt-1 font-medium text-slate-900">-</div>
+                            </div>
+                            <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                <div class="text-xs text-muted-foreground">服务地址</div>
+                                <div id="summaryBaseUrl" class="mt-1 break-all font-medium text-slate-900">-</div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                    <div class="text-xs text-muted-foreground">启动码</div>
+                                    <div id="summaryLaunchCode" class="mt-1 font-medium text-slate-900">-</div>
+                                </div>
+                                <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                    <div class="text-xs text-muted-foreground">接口鉴权</div>
+                                    <div id="summaryApiKey" class="mt-1 font-medium text-slate-900">-</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                    <div class="text-xs text-muted-foreground">代理</div>
+                                    <div id="summaryProxy" class="mt-1 font-medium text-slate-900">-</div>
+                                </div>
+                                <div class="rounded-xl bg-stone-50 px-3 py-3">
+                                    <div class="text-xs text-muted-foreground">诊断状态</div>
+                                    <div id="summaryReady" class="mt-1 font-medium text-slate-900">-</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-black/5 bg-white p-5 shadow-sm">
+                        <h2 class="text-sm font-semibold text-slate-900">执行目标</h2>
+                        <div class="mt-4 space-y-3 text-sm">
+                            <div class="rounded-xl bg-amber-50 px-3 py-3 text-amber-900">
+                                <div class="font-medium">固定检查项</div>
+                                <div class="mt-1 text-xs leading-5">
+                                    配置检查、LaunchServer 连通性、启动返回、CDP 连接、打码分数测试
+                                </div>
+                            </div>
+                            <div class="rounded-xl bg-slate-50 px-3 py-3 text-slate-700">
+                                <div class="font-medium">测试目标</div>
+                                <div class="mt-1 text-xs leading-5 break-all">https://antcpt.com/score_detector/</div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <section class="rounded-[28px] border border-black/5 bg-white shadow-sm">
+                    <div class="border-b border-black/5 px-5 py-4 sm:px-6">
+                        <h2 class="text-base font-semibold text-slate-900">诊断对话</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">点击开始诊断后，系统会按步骤返回检查结果。</p>
+                    </div>
+
+                    <div id="chatContainer" class="chat-scroll h-[62vh] overflow-y-auto px-4 py-5 sm:px-6">
+                    </div>
+
+                    <div class="border-t border-black/5 bg-stone-50/80 px-4 py-4 sm:px-6">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="rounded-2xl border border-black/5 bg-white px-4 py-3 text-sm text-muted-foreground">
+                                当前页面不需要手动输入，直接使用已保存配置执行诊断。
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button id="btnStart" class="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">开始诊断</button>
+                                <button id="btnRetry" class="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm hover:bg-accent">重新测试</button>
+                                <button id="btnClear" class="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm hover:bg-accent">清空记录</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const $=id=>document.getElementById(id);
+        let diagnosticsSummary=null;
+        let isRunning=false;
+
+        const checkAuth=()=>{
+            const token=localStorage.getItem('adminToken');
+            if(!token){
+                location.href='/login';
+                return null;
+            }
+            return token;
+        };
+
+        const apiRequest=async(url,opts={})=>{
+            const token=checkAuth();
+            if(!token) return null;
+            const response=await fetch(url,{
+                ...opts,
+                headers:{
+                    ...opts.headers,
+                    Authorization:`Bearer ${token}`,
+                    'Content-Type':'application/json'
+                }
+            });
+            if(response.status===401){
+                localStorage.removeItem('adminToken');
+                location.href='/login';
+                return null;
+            }
+            return response;
+        };
+
+        const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+        const showToast=(message,type='info')=>{
+            const palette={success:'bg-green-600',error:'bg-destructive',info:'bg-primary'};
+            const node=document.createElement('div');
+            node.className=`fixed bottom-4 right-4 ${palette[type]||palette.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;
+            node.textContent=message;
+            document.body.appendChild(node);
+            setTimeout(()=>{
+                node.style.opacity='0';
+                node.style.transition='opacity .3s';
+                setTimeout(()=>node.parentNode&&node.remove(),300);
+            },2200);
+        };
+
+        const scrollChatToBottom=()=>{
+            const container=$('chatContainer');
+            container.scrollTop=container.scrollHeight;
+        };
+
+        const addMessage=(role,html)=>{
+            const container=$('chatContainer');
+            const wrapper=document.createElement('div');
+            wrapper.className=`mb-4 flex ${role==='user'?'justify-end':'justify-start'}`;
+            wrapper.innerHTML=role==='user'
+                ? `<div class="max-w-[85%] rounded-3xl rounded-br-md bg-slate-900 px-4 py-3 text-sm leading-6 text-white shadow-sm">${html}</div>`
+                : `<div class="max-w-[90%] rounded-3xl rounded-bl-md border border-black/5 bg-stone-50 px-4 py-3 text-sm leading-6 text-slate-800 shadow-sm">${html}</div>`;
+            container.appendChild(wrapper);
+            scrollChatToBottom();
+        };
+
+        const statusChip=(status)=>{
+            const map={
+                success:'bg-green-100 text-green-700',
+                error:'bg-red-100 text-red-700',
+                running:'bg-amber-100 text-amber-700',
+                info:'bg-slate-100 text-slate-700'
+            };
+            const labelMap={success:'成功',error:'失败',running:'进行中',info:'信息'};
+            return `<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${map[status]||map.info}">${labelMap[status]||labelMap.info}</span>`;
+        };
+
+        const renderStepCard=step=>{
+            const details=step.details&&Object.keys(step.details).length
+                ? `<div class="mt-3 rounded-2xl bg-white/80 px-3 py-3 text-xs leading-5 text-slate-600 border border-black/5">${Object.entries(step.details).map(([key,value])=>`<div><span class="font-medium text-slate-700">${escapeHtml(key)}:</span> ${escapeHtml(typeof value==='object'?JSON.stringify(value):value)}</div>`).join('')}</div>`
+                : '';
+            return `
+                <div class="rounded-2xl border border-black/5 bg-white px-4 py-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="font-medium text-slate-900">${escapeHtml(step.title||step.key||'步骤')}</div>
+                        ${statusChip(step.status)}
+                    </div>
+                    <div class="mt-2 text-sm text-slate-700">${escapeHtml(step.message||'')}</div>
+                    ${details}
+                </div>
+            `;
+        };
+
+        const renderSummaryMessage=summary=>{
+            const lines=[
+                `当前打码方式：${summary.captcha_method||'-'}`,
+                `服务地址：${summary.base_url||'未配置'}`,
+                `启动码：${summary.launch_code_configured?'已配置':'未配置'}`,
+                `接口鉴权：${summary.api_key_configured?'已配置':'未配置'}`
+            ];
+            return `
+                <div class="space-y-3">
+                    <div>你好，这里是打码诊断助手。我会使用当前已保存的 ant-chrome 配置做逐步检查。</div>
+                    <div class="rounded-2xl border border-black/5 bg-white px-4 py-3 text-sm text-slate-700">
+                        ${lines.map(line=>`<div>${escapeHtml(line)}</div>`).join('')}
+                    </div>
+                    <div>点击“开始诊断”即可。</div>
+                </div>
+            `;
+        };
+
+        const updateSummaryPanel=summary=>{
+            diagnosticsSummary=summary;
+            $('summaryMethod').textContent=summary.captcha_method||'-';
+            $('summaryBaseUrl').textContent=summary.base_url||'未配置';
+            $('summaryLaunchCode').textContent=summary.launch_code_configured?'已配置':'未配置';
+            $('summaryApiKey').textContent=summary.api_key_configured?'已配置':'未配置';
+            $('summaryProxy').textContent=summary.browser_proxy_enabled?'已启用':'未启用';
+            $('summaryReady').textContent=summary.ready_for_diagnose?'可开始诊断':'待补全配置';
+            $('modeBadge').textContent=summary.is_ant_browser_mode?'当前模式：ant_browser':'当前模式：'+(summary.captcha_method||'未配置');
+            $('modeBadge').className=`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${summary.is_ant_browser_mode?'border border-green-200 bg-green-50 text-green-700':'border border-amber-200 bg-amber-50 text-amber-700'}`;
+        };
+
+        const loadSummary=async({announce=false}={})=>{
+            const response=await apiRequest('/api/diagnostics/ant-browser/summary');
+            if(!response) return;
+            const data=await response.json();
+            updateSummaryPanel(data.summary||{});
+            if(announce){
+                addMessage('system',renderSummaryMessage(data.summary||{}));
+            }
+        };
+
+        const setRunningState=running=>{
+            isRunning=running;
+            $('btnStart').disabled=running;
+            $('btnRetry').disabled=running;
+            $('btnRefreshSummary').disabled=running;
+            $('btnStart').textContent=running?'诊断中...':'开始诊断';
+            $('btnRetry').textContent=running?'请稍候':'重新测试';
+            $('btnStart').classList.toggle('opacity-60',running);
+            $('btnRetry').classList.toggle('opacity-60',running);
+        };
+
+        const addFinalDiagnosis=data=>{
+            const success=!!data.success;
+            const title=success?'诊断结论：ant-chrome 配置可用':'诊断结论：ant-chrome 配置未打通';
+            const subtitle=success
+                ? '当前 ant-browser 链路已经打通，可以继续执行分数测试。'
+                : `失败阶段：${data.stage||'unknown'}。${data.message||'请检查上方步骤详情。'}`;
+            addMessage('system',`
+                <div class="rounded-2xl border ${success?'border-green-200 bg-green-50':'border-red-200 bg-red-50'} px-4 py-4">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="font-semibold ${success?'text-green-800':'text-red-800'}">${escapeHtml(title)}</div>
+                        ${statusChip(success?'success':'error')}
+                    </div>
+                    <div class="mt-2 text-sm ${success?'text-green-700':'text-red-700'}">${escapeHtml(subtitle)}</div>
+                    <div class="mt-3 text-xs ${success?'text-green-700/80':'text-red-700/80'}">总耗时：${escapeHtml(data.elapsed_ms??'-')} ms</div>
+                </div>
+            `);
+        };
+
+        const processDiagnosticsResult=async(data)=>{
+            const steps=Array.isArray(data.steps)?data.steps:[];
+            if(steps.length){
+                addMessage('system',`<div class="space-y-3">${steps.map(renderStepCard).join('')}</div>`);
+            }else{
+                addMessage('system',renderStepCard({title:'诊断结果',status:data.success?'success':'error',message:data.message||'未返回详细步骤'}));
+            }
+            addFinalDiagnosis(data);
+            await loadSummary();
+            showToast(data.success?'诊断完成':'诊断失败',data.success?'success':'error');
+        };
+
+        const runDiagnosticsFallback=async()=>{
+            const response=await apiRequest('/api/diagnostics/ant-browser/run',{method:'POST',body:JSON.stringify({})});
+            if(!response){
+                addMessage('system',renderStepCard({title:'请求失败',status:'error',message:'诊断请求未发出，请重新登录后重试'}));
+                return;
+            }
+            const data=await response.json();
+            await processDiagnosticsResult(data);
+        };
+
+        const runDiagnosticsStream=async()=>{
+            const token=checkAuth();
+            if(!token) return false;
+            const response=await fetch('/api/diagnostics/ant-browser/run-stream',{
+                method:'POST',
+                headers:{
+                    Authorization:`Bearer ${token}`,
+                    'Content-Type':'application/json'
+                },
+                body:JSON.stringify({})
+            });
+            if(response.status===401){
+                localStorage.removeItem('adminToken');
+                location.href='/login';
+                return true;
+            }
+            if(!response.ok||!response.body){
+                return false;
+            }
+
+            const decoder=new TextDecoder();
+            const reader=response.body.getReader();
+            let buffer='';
+            while(true){
+                const {value,done}=await reader.read();
+                if(done) break;
+                buffer+=decoder.decode(value,{stream:true});
+                const lines=buffer.split('\n');
+                buffer=lines.pop()||'';
+                for(const line of lines){
+                    const trimmed=line.trim();
+                    if(!trimmed) continue;
+                    let payload;
+                    try{
+                        payload=JSON.parse(trimmed);
+                    }catch(_error){
+                        continue;
+                    }
+                    if(payload.type==='step'&&payload.data){
+                        addMessage('system',renderStepCard(payload.data));
+                    }else if(payload.type==='result'&&payload.data){
+                        addFinalDiagnosis(payload.data);
+                        await loadSummary();
+                        showToast(payload.data.success?'诊断完成':'诊断失败',payload.data.success?'success':'error');
+                    }
+                }
+            }
+            return true;
+        };
+
+        const runDiagnostics=async()=>{
+            if(isRunning) return;
+            addMessage('user','开始诊断 ant-chrome');
+            addMessage('system',`<div class="flex items-center gap-2">${statusChip('running')}<span>正在按固定步骤执行诊断，请稍候。</span></div>`);
+            setRunningState(true);
+            try{
+                const streamed=await runDiagnosticsStream();
+                if(!streamed){
+                    await runDiagnosticsFallback();
+                }
+            }catch(error){
+                addMessage('system',renderStepCard({title:'未知错误',status:'error',message:`诊断执行失败: ${error.message}`}));
+                showToast('诊断执行失败: '+error.message,'error');
+            }finally{
+                setRunningState(false);
+            }
+        };
+
+        const clearMessages=()=>{
+            $('chatContainer').innerHTML='';
+            if(diagnosticsSummary){
+                addMessage('system',renderSummaryMessage(diagnosticsSummary));
+            }
+        };
+
+        $('btnStart').addEventListener('click',runDiagnostics);
+        $('btnRetry').addEventListener('click',runDiagnostics);
+        $('btnClear').addEventListener('click',clearMessages);
+        $('btnRefreshSummary').addEventListener('click',async()=>{
+            await loadSummary();
+            showToast('配置摘要已刷新','success');
+        });
+
+        window.addEventListener('DOMContentLoaded',async()=>{
+            try{
+                await loadSummary({announce:true});
+            }catch(error){
+                addMessage('system',renderStepCard({title:'初始化失败',status:'error',message:`无法加载诊断摘要: ${error.message}`}));
+            }
+        });
+    </script>
+</body>
+</html>

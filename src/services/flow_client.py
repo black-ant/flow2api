@@ -2157,12 +2157,12 @@ class FlowClient:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)
                 debug_logger.log_error(f"[reCAPTCHA Personal] {error_msg}")
-                print(f"[reCAPTCHA] ❌ 内置浏览器打码失败: {error_msg}")
+                print(f"[reCAPTCHA] [ERROR] 内置浏览器打码失败: {error_msg}")
                 self._set_request_fingerprint(None)
                 return None, None
             except ImportError as e:
                 debug_logger.log_error(f"[reCAPTCHA Personal] 导入失败: {str(e)}")
-                print(f"[reCAPTCHA] ❌ nodriver 未安装，请运行: pip install nodriver")
+                print(f"[reCAPTCHA] [ERROR] nodriver 未安装，请运行: pip install nodriver")
                 self._set_request_fingerprint(None)
                 return None, None
             except Exception as e:
@@ -2182,12 +2182,12 @@ class FlowClient:
                 # 捕获 Docker 环境或依赖缺失的明确错误
                 error_msg = str(e)
                 debug_logger.log_error(f"[reCAPTCHA {captcha_method}] {error_msg}")
-                print(f"[reCAPTCHA] ❌ {captcha_method} 打码失败: {error_msg}")
+                print(f"[reCAPTCHA] [ERROR] {captcha_method} 打码失败: {error_msg}")
                 self._set_request_fingerprint(None)
                 return None, None
             except ImportError as e:
                 debug_logger.log_error(f"[reCAPTCHA {captcha_method}] 导入失败: {str(e)}")
-                print(f"[reCAPTCHA] ❌ playwright 未安装，请运行: pip install playwright")
+                print(f"[reCAPTCHA] [ERROR] playwright 未安装，请运行: pip install playwright")
                 self._set_request_fingerprint(None)
                 return None, None
             except Exception as e:

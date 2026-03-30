@@ -108,7 +108,7 @@ def _ensure_nodriver_installed() -> bool:
         return True
     
     debug_logger.log_error("[BrowserCaptcha] ❌ nodriver 自动安装失败，请手动安装: pip install nodriver")
-    print("[BrowserCaptcha] ❌ nodriver 自动安装失败，请手动安装: pip install nodriver")
+    print("[BrowserCaptcha] [ERROR] nodriver 自动安装失败，请手动安装: pip install nodriver")
     return False
 
 
@@ -121,7 +121,7 @@ if DOCKER_HEADED_BLOCKED:
         "[BrowserCaptcha] 检测到 Docker 环境，默认禁用内置浏览器打码。"
         "如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb。"
     )
-    print("[BrowserCaptcha] ⚠️ 检测到 Docker 环境，默认禁用内置浏览器打码")
+    print("[BrowserCaptcha] [WARN] 检测到 Docker 环境，默认禁用内置浏览器打码")
     print("[BrowserCaptcha] 如需启用请设置 ALLOW_DOCKER_HEADED_CAPTCHA=true，并提供 DISPLAY/Xvfb")
 else:
     if IS_DOCKER and ALLOW_DOCKER_HEADED:
@@ -135,7 +135,7 @@ else:
             NODRIVER_AVAILABLE = True
         except ImportError as e:
             debug_logger.log_error(f"[BrowserCaptcha] nodriver 导入失败: {e}")
-            print(f"[BrowserCaptcha] ❌ nodriver 导入失败: {e}")
+            print(f"[BrowserCaptcha] [ERROR] nodriver 导入失败: {e}")
 
 
 class ResidentTabInfo:

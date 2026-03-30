@@ -204,6 +204,11 @@ class Config:
         return self._config["server"]["host"]
 
     @property
+    def server_display_host(self) -> str:
+        host = self.server_host
+        return "127.0.0.1" if host == "0.0.0.0" else host
+
+    @property
     def server_port(self) -> int:
         return self._config["server"]["port"]
 

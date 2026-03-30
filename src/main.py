@@ -36,13 +36,13 @@ async def lifespan(app: FastAPI):
 
     # Handle database initialization based on startup type
     if is_first_startup:
-        print("🎉 First startup detected. Initializing database and configuration from setting.toml...")
+        print("[INIT] First startup detected. Initializing database and configuration from setting.toml...")
         await db.init_config_from_toml(config_dict, is_first_startup=True)
-        print("✓ Database and configuration initialized successfully.")
+        print("[OK] Database and configuration initialized successfully.")
     else:
-        print("🔄 Existing database detected. Checking for missing tables and columns...")
+        print("[INIT] Existing database detected. Checking for missing tables and columns...")
         await db.check_and_migrate_db(config_dict)
-        print("✓ Database migration check completed.")
+        print("[OK] Database migration check completed.")
 
     # Load admin config from database
     admin_config = await db.get_admin_config()
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
     if captcha_config.captcha_method == "personal":
         from .services.browser_captcha_personal import BrowserCaptchaService
         browser_service = await BrowserCaptchaService.get_instance(db)
-        print("✓ Browser captcha service initialized (nodriver mode)")
+        print("[OK] Browser captcha service initialized (nodriver mode)")
         
         # 启动常驻模式：从第一个可用token获取project_id
         tokens = await token_manager.get_all_tokens()
@@ -105,16 +105,16 @@ async def lifespan(app: FastAPI):
         if resident_project_id:
             # 直接启动常驻模式（会自动导航到项目页面，cookie已持久化）
             await browser_service.start_resident_mode(resident_project_id)
-            print(f"✓ Browser captcha resident mode started (project: {resident_project_id[:8]}...)")
+            print(f"[OK] Browser captcha resident mode started (project: {resident_project_id[:8]}...)")
         else:
             # 没有可用的project_id时，打开登录窗口供用户手动操作
             await browser_service.open_login_window()
-            print("⚠ No active token with project_id found, opened login window for manual setup")
+            print("[WARN] No active token with project_id found, opened login window for manual setup")
     elif captcha_config.captcha_method in {"browser", "ant_browser"}:
         from .services.browser_captcha import BrowserCaptchaService
         browser_service = await BrowserCaptchaService.get_instance(db)
         await browser_service.warmup_browser_slots()
-        print("? Browser captcha service initialized (headed mode)")
+        print("[OK] Browser captcha service initialized (headed mode)")
 
     # Initialize concurrency manager
     tokens = await token_manager.get_all_tokens()
@@ -133,16 +133,16 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(3600)  # 每小时执行一次
                 await token_manager.auto_unban_429_tokens()
             except Exception as e:
-                print(f"❌ Auto-unban task error: {e}")
+                print(f"[ERROR] Auto-unban task error: {e}")
 
     auto_unban_task_handle = asyncio.create_task(auto_unban_task())
 
-    print(f"✓ Database initialized")
-    print(f"✓ Total tokens: {len(tokens)}")
-    print(f"✓ Cache: {'Enabled' if config.cache_enabled else 'Disabled'} (timeout: {config.cache_timeout}s)")
-    print(f"✓ File cache cleanup task started")
-    print(f"✓ 429 auto-unban task started (runs every hour)")
-    print(f"✓ Server running on http://{config.server_host}:{config.server_port}")
+    print(f"[OK] Database initialized")
+    print(f"[OK] Total tokens: {len(tokens)}")
+    print(f"[OK] Cache: {'Enabled' if config.cache_enabled else 'Disabled'} (timeout: {config.cache_timeout}s)")
+    print(f"[OK] File cache cleanup task started")
+    print(f"[OK] 429 auto-unban task started (runs every hour)")
+    print(f"[OK] Server running on http://{config.server_display_host}:{config.server_port}")
     print("=" * 60)
 
     yield
@@ -160,9 +160,9 @@ async def lifespan(app: FastAPI):
     # Close browser if initialized
     if browser_service:
         await browser_service.close()
-        print("✓ Browser captcha service closed")
-    print("✓ File cache cleanup task stopped")
-    print("✓ 429 auto-unban task stopped")
+        print("[OK] Browser captcha service closed")
+    print("[OK] File cache cleanup task stopped")
+    print("[OK] 429 auto-unban task stopped")
 
 
 # Initialize components
@@ -240,3 +240,21 @@ async def manage_page():
     if manage_file.exists():
         return FileResponse(str(manage_file))
     return HTMLResponse(content="<h1>Management Page Not Found</h1>", status_code=404)
+
+
+@app.get("/diagnostics", response_class=HTMLResponse)
+async def diagnostics_page():
+    """Diagnostics page"""
+    diagnostics_file = static_path / "diagnostics.html"
+    if diagnostics_file.exists():
+        return FileResponse(str(diagnostics_file))
+    return HTMLResponse(content="<h1>Diagnostics Page Not Found</h1>", status_code=404)
+
+
+@app.get("/playground", response_class=HTMLResponse)
+async def playground_page():
+    """Request playground page"""
+    playground_file = static_path / "playground.html"
+    if playground_file.exists():
+        return FileResponse(str(playground_file))
+    return HTMLResponse(content="<h1>Playground Page Not Found</h1>", status_code=404)

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>接口测试 - Flow2API</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-scroll::-webkit-scrollbar{width:10px}
+        .chat-scroll::-webkit-scrollbar-thumb{background:rgba(100,116,139,.35);border-radius:999px}
+        .chat-scroll::-webkit-scrollbar-track{background:transparent}
+        .preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+    </style>
+    <script>
+        tailwind.config={theme:{extend:{colors:{border:"hsl(0 0% 89%)",input:"hsl(0 0% 86%)",ring:"hsl(0 0% 20%)",background:"hsl(0 0% 98%)",foreground:"hsl(0 0% 8%)",primary:{DEFAULT:"hsl(0 0% 10%)",foreground:"hsl(0 0% 98%)"},secondary:{DEFAULT:"hsl(0 0% 100%)",foreground:"hsl(0 0% 12%)"},muted:{DEFAULT:"hsl(0 0% 96%)",foreground:"hsl(0 0% 45%)"},destructive:{DEFAULT:"hsl(0 72% 58%)",foreground:"hsl(0 0% 100%)"}}}}}
+    </script>
+</head>
+<body class="h-full bg-background text-foreground antialiased">
+    <div class="flex min-h-full flex-col">
+        <header class="border-b border-border bg-white/90 backdrop-blur">
+            <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
+                <div>
+                    <h1 class="text-lg font-semibold tracking-tight">接口测试</h1>
+                    <p class="text-xs text-muted-foreground">对话式模拟调用 flow2api 的图片 / 视频生成接口</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="btnReloadConfig" class="inline-flex items-center justify-center rounded-md border border-input bg-secondary px-3 py-2 text-sm hover:bg-slate-800">刷新</button>
+                    <a href="/manage" class="inline-flex items-center justify-center rounded-md border border-input bg-secondary px-3 py-2 text-sm hover:bg-slate-800">返回管理页</a>
+                </div>
+            </div>
+        </header>
+
+        <main class="mx-auto flex w-full max-w-7xl flex-1 flex-col px-3 py-4 sm:px-6">
+            <div class="flex min-h-[calc(100vh-8rem)] flex-1 flex-col overflow-hidden rounded-[28px] border border-border bg-white shadow-xl shadow-black/5">
+                <div class="border-b border-border bg-white px-4 py-3 sm:px-5">
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-700">请求地址：<span id="baseUrlLabel" class="ml-1 font-medium">-</span></span>
+                            <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-700">认证：<span id="apiKeyStatus" class="ml-1 font-medium">读取中</span></span>
+                        </div>
+                        <div class="flex flex-col gap-2 sm:flex-row">
+                            <select id="modelSelect" class="h-10 rounded-xl border border-input bg-white px-3 text-sm text-foreground outline-none ring-0">
+                            </select>
+                            <button id="btnFillExample" class="inline-flex h-10 items-center justify-center rounded-xl border border-input bg-white px-4 text-sm hover:bg-accent">填充示例</button>
+                            <button id="btnToggleRefs" class="inline-flex h-10 items-center justify-center rounded-xl border border-input bg-white px-4 text-sm hover:bg-accent">参考图</button>
+                        </div>
+                    </div>
+                    <div id="referencePanel" class="mt-3 hidden rounded-2xl border border-border bg-muted p-3">
+                        <label class="mb-2 block text-sm font-medium text-foreground">上传参考图（可选）</label>
+                        <input id="imageFilesInput" type="file" accept="image/*" multiple class="block w-full rounded-xl border border-input bg-white px-3 py-3 text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white">
+                        <div class="mt-2 text-xs text-slate-500">直接上传图片，发送时会按多模态消息一并提交，不再使用参考图 URL。</div>
+                        <div id="imageFilesPreview" class="preview-grid mt-3 hidden"></div>
+                    </div>
+                </div>
+
+                <div id="chatContainer" class="chat-scroll flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                </div>
+
+                <div class="border-t border-border bg-white px-4 py-4 sm:px-6">
+                    <div class="rounded-[26px] border border-input bg-muted p-3 shadow-sm">
+                        <textarea id="promptInput" class="min-h-[72px] w-full resize-none bg-transparent px-2 py-1 text-base text-foreground outline-none placeholder:text-slate-400" placeholder="输入提示词，发送图片或视频生成请求..."></textarea>
+                        <div class="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="text-xs text-muted-foreground">
+                                当前模型会通过 `/v1/chat/completions` 发起真实请求。
+                            </div>
+                            <button id="btnSend" class="inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-6 text-sm font-semibold text-primary-foreground hover:brightness-110">发送请求</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const $=id=>document.getElementById(id);
+        const state={config:null,isSending:false,previewObjectUrls:[]};
+
+        const checkAuth=()=>{
+            const token=localStorage.getItem('adminToken');
+            if(!token){
+                location.href='/login';
+                return null;
+            }
+            return token;
+        };
+
+        const apiRequest=async(url,opts={})=>{
+            const token=checkAuth();
+            if(!token) return null;
+            const response=await fetch(url,{
+                ...opts,
+                headers:{
+                    ...opts.headers,
+                    Authorization:`Bearer ${token}`,
+                    'Content-Type':'application/json'
+                }
+            });
+            if(response.status===401){
+                localStorage.removeItem('adminToken');
+                location.href='/login';
+                return null;
+            }
+            return response;
+        };
+
+        const showToast=(message,type='info')=>{
+            const palette={success:'bg-emerald-500',error:'bg-destructive',info:'bg-primary'};
+            const node=document.createElement('div');
+            node.className=`fixed bottom-4 right-4 ${palette[type]||palette.info} text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium z-50`;
+            node.textContent=message;
+            document.body.appendChild(node);
+            setTimeout(()=>{
+                node.style.opacity='0';
+                node.style.transition='opacity .3s';
+                setTimeout(()=>node.remove(),300);
+            },2200);
+        };
+
+        const scrollToBottom=()=>{
+            const container=$('chatContainer');
+            container.scrollTop=container.scrollHeight;
+        };
+
+        const escapeHtml=text=>String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+        const addBubble=(role,html)=>{
+            const wrapper=document.createElement('div');
+            wrapper.className=`mb-4 flex ${role==='user'?'justify-end':'justify-start'}`;
+            wrapper.innerHTML=role==='user'
+                ? `<div class="max-w-[85%] rounded-[24px] rounded-br-md bg-slate-900 px-4 py-3 text-sm leading-6 text-white shadow-sm">${html}</div>`
+                : `<div class="max-w-[88%] rounded-[24px] rounded-bl-md border border-border bg-white px-4 py-3 text-sm leading-6 text-slate-900 shadow-sm">${html}</div>`;
+            $('chatContainer').appendChild(wrapper);
+            scrollToBottom();
+        };
+
+        const addSystemIntro=()=>{
+            $('chatContainer').innerHTML='';
+            addBubble('assistant',`
+                <div class="space-y-3">
+                    <div class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/20 text-lg">AI</div>
+                    <div>你好，这里可以直接模拟调用 flow2api 的生成接口。</div>
+                    <div class="rounded-2xl border border-border bg-muted px-4 py-3 text-slate-700">
+                        只需要选模型，输入提示词；如果需要，再直接上传参考图。
+                    </div>
+                </div>
+            `);
+        };
+
+        const getAllModels=()=>Array.isArray(state.config?.openai_models)?state.config.openai_models:[];
+
+        const refreshModelSelect=()=>{
+            const models=getAllModels();
+            $('modelSelect').innerHTML=models.map(item=>`<option value="${item.id}">${item.id}</option>`).join('');
+            if(models.some(item=>item.id===state.config?.default_openai_image_model)){
+                $('modelSelect').value=state.config.default_openai_image_model;
+            }
+        };
+
+        const loadConfig=async()=>{
+            const response=await apiRequest('/api/playground/config');
+            if(!response) return;
+            const data=await response.json();
+            state.config=data.config||null;
+            $('baseUrlLabel').textContent=state.config?.base_url||location.origin;
+            $('apiKeyStatus').textContent=state.config?.api_key?'已读取 API Key':'未读取 API Key';
+            refreshModelSelect();
+        };
+
+        const getSelectedImageFiles=()=>Array.from($('imageFilesInput').files||[]);
+
+        const readFileAsDataUrl=file=>new Promise((resolve,reject)=>{
+            const reader=new FileReader();
+            reader.onload=()=>resolve(String(reader.result||''));
+            reader.onerror=()=>reject(new Error(`读取图片失败: ${file.name}`));
+            reader.readAsDataURL(file);
+        });
+
+        const renderSelectedImagePreviews=()=>{
+            const files=getSelectedImageFiles();
+            const preview=$('imageFilesPreview');
+            state.previewObjectUrls.forEach(url=>URL.revokeObjectURL(url));
+            state.previewObjectUrls=[];
+            if(!files.length){
+                preview.innerHTML='';
+                preview.classList.add('hidden');
+                return;
+            }
+            preview.classList.remove('hidden');
+            preview.innerHTML=files.map(file=>{
+                const objectUrl=URL.createObjectURL(file);
+                state.previewObjectUrls.push(objectUrl);
+                return `<div class="rounded-2xl border border-border bg-white p-3"><img src="${objectUrl}" alt="${escapeHtml(file.name)}" class="h-40 w-full rounded-xl object-cover"/><div class="mt-2 break-all text-xs text-slate-500">${escapeHtml(file.name)} · ${(file.size/1024).toFixed(1)} KB</div></div>`;
+            }).join('');
+        };
+
+        const buildRequestPayload=async()=>{
+            const content=[{type:'text',text:$('promptInput').value.trim()}];
+            const imageDataUrls=await Promise.all(getSelectedImageFiles().map(readFileAsDataUrl));
+            imageDataUrls.forEach(url=>content.push({type:'image_url',image_url:{url}}));
+            return {
+                model:$('modelSelect').value,
+                messages:[{role:'user',content}],
+                stream:false
+            };
+        };
+
+        const extractMediaUrls=(payload)=>{
+            const urls=[];
+            const pushValue=value=>{
+                if(typeof value==='string'&&(value.startsWith('http://')||value.startsWith('https://')||value.startsWith('/tmp/')||value.startsWith('data:image'))){
+                    urls.push(value);
+                }
+            };
+            const walk=node=>{
+                if(!node) return;
+                if(typeof node==='string'){
+                    const imageMatches=[...node.matchAll(/!\[.*?\]\((.*?)\)/g)];
+                    const videoMatches=[...node.matchAll(/<video[^>]+src=['"](.*?)['"]/gi)];
+                    imageMatches.forEach(match=>pushValue(match[1]));
+                    videoMatches.forEach(match=>pushValue(match[1]));
+                    return;
+                }
+                if(Array.isArray(node)){
+                    node.forEach(walk);
+                    return;
+                }
+                if(typeof node==='object'){
+                    Object.values(node).forEach(walk);
+                }
+            };
+            walk(payload);
+            return [...new Set(urls)];
+        };
+
+        const renderMediaCards=(urls)=>{
+            if(!urls.length){
+                return `<div class="rounded-2xl border border-border bg-muted px-4 py-3 text-sm text-slate-500">没有检测到图片或视频 URL。</div>`;
+            }
+            return `<div class="preview-grid">${urls.map(url=>{
+                const isVideo=/\.mp4(\?|$)/i.test(url)||url.includes('<video');
+                if(isVideo){
+                    return `<div class="rounded-2xl border border-border bg-muted p-3"><video src="${url}" controls class="w-full rounded-xl bg-black"></video><div class="mt-2 break-all text-xs text-slate-500">${escapeHtml(url)}</div></div>`;
+                }
+                return `<div class="rounded-2xl border border-border bg-muted p-3"><img src="${url}" alt="preview" class="w-full rounded-xl object-cover"/><div class="mt-2 break-all text-xs text-slate-500">${escapeHtml(url)}</div></div>`;
+            }).join('')}</div>`;
+        };
+
+        const fillExample=()=>{
+            const model=$('modelSelect').value||'';
+            if(model.startsWith('veo_')){
+                $('promptInput').value='A slow tracking shot through a rainy neon alley at night, reflections on the ground, cinematic lighting.';
+                return;
+            }
+            $('promptInput').value='A cinematic product photo of a glass perfume bottle on a wet stone, soft fog, dramatic rim light, ultra detailed.';
+        };
+
+        const setSendingState=sending=>{
+            state.isSending=sending;
+            $('btnSend').disabled=sending;
+            $('btnSend').textContent=sending?'发送中...':'发送请求';
+            $('btnReloadConfig').disabled=sending;
+        };
+
+        const sendRequest=async()=>{
+            if(state.isSending) return;
+            const prompt=$('promptInput').value.trim();
+            if(!prompt){
+                showToast('请输入提示词','error');
+                return;
+            }
+            if(!state.config?.api_key){
+                showToast('当前未读取到 API Key','error');
+                return;
+            }
+
+            const model=$('modelSelect').value;
+            const imageFiles=getSelectedImageFiles();
+            const requestPayload=await buildRequestPayload();
+
+            addBubble('user',`
+                <div class="space-y-2">
+                    <div class="text-xs uppercase tracking-[0.2em] text-slate-500">User</div>
+                    <div>${escapeHtml(prompt)}</div>
+                    <div class="text-xs text-slate-600">模型：${escapeHtml(model)}${imageFiles.length?` | 参考图：${imageFiles.length} 张`:''}</div>
+                </div>
+            `);
+            addBubble('assistant',`
+                <div class="space-y-3">
+                    <div class="text-sm text-slate-700">已发起真实请求，正在等待生成结果。</div>
+                    <div class="rounded-2xl border border-border bg-muted px-4 py-3 text-xs text-slate-500">POST /v1/chat/completions</div>
+                </div>
+            `);
+
+            setSendingState(true);
+            const startedAt=Date.now();
+            try{
+                const response=await fetch('/v1/chat/completions',{
+                    method:'POST',
+                    headers:{
+                        'Content-Type':'application/json',
+                        Authorization:`Bearer ${state.config.api_key}`
+                    },
+                    body:JSON.stringify(requestPayload)
+                });
+                const text=await response.text();
+                let data;
+                try{
+                    data=JSON.parse(text);
+                }catch(_error){
+                    data={raw:text};
+                }
+                const elapsedMs=Date.now()-startedAt;
+                const urls=extractMediaUrls(data);
+                addBubble('assistant',`
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="font-medium ${response.ok?'text-emerald-600':'text-red-600'}">${response.ok?'请求成功':'请求失败'}</div>
+                            <div class="text-xs text-slate-500">/v1/chat/completions | ${elapsedMs} ms</div>
+                        </div>
+                        ${renderMediaCards(urls)}
+                        <details class="rounded-2xl border border-border bg-muted">
+                            <summary class="cursor-pointer px-4 py-3 text-sm text-slate-700">查看响应体</summary>
+                            <pre class="overflow-auto border-t border-border px-4 py-4 text-xs leading-6 text-slate-700">${escapeHtml(JSON.stringify(data,null,2))}</pre>
+                        </details>
+                    </div>
+                `);
+                showToast(response.ok?'请求完成':'请求失败',response.ok?'success':'error');
+            }catch(error){
+                const elapsedMs=Date.now()-startedAt;
+                addBubble('assistant',`
+                    <div class="space-y-3">
+                        <div class="font-medium text-red-600">请求异常</div>
+                        <div class="text-sm text-slate-700">${escapeHtml(error.message||String(error))}</div>
+                        <div class="text-xs text-slate-500">/v1/chat/completions | ${elapsedMs} ms</div>
+                    </div>
+                `);
+                showToast('请求异常: '+error.message,'error');
+            }finally{
+                setSendingState(false);
+            }
+        };
+
+        $('btnSend').addEventListener('click',sendRequest);
+        $('btnFillExample').addEventListener('click',fillExample);
+        $('btnReloadConfig').addEventListener('click',async()=>{await loadConfig();showToast('配置已刷新','success');});
+        $('btnToggleRefs').addEventListener('click',()=>{$('referencePanel').classList.toggle('hidden');});
+        $('imageFilesInput').addEventListener('change',renderSelectedImagePreviews);
+        $('modelSelect').addEventListener('change',fillExample);
+        $('promptInput').addEventListener('keydown',event=>{
+            if(event.key==='Enter'&&!event.shiftKey){
+                event.preventDefault();
+                sendRequest();
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded',async()=>{
+            addSystemIntro();
+            await loadConfig();
+            fillExample();
+        });
+        window.addEventListener('beforeunload',()=>{
+            state.previewObjectUrls.forEach(url=>URL.revokeObjectURL(url));
+        });
+    </script>
+</body>
+</html>

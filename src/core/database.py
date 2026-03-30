@@ -289,7 +289,7 @@ class Database:
             # ========== Step 1: Create missing tables ==========
             # Check and create cache_config table if missing
             if not await self._table_exists(db, "cache_config"):
-                print("  ✓ Creating missing table: cache_config")
+                print("  [OK] Creating missing table: cache_config")
                 await db.execute("""
                     CREATE TABLE cache_config (
                         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -303,7 +303,7 @@ class Database:
 
             # Check and create proxy_config table if missing
             if not await self._table_exists(db, "proxy_config"):
-                print("  ✓ Creating missing table: proxy_config")
+                print("  [OK] Creating missing table: proxy_config")
                 await db.execute("""
                     CREATE TABLE proxy_config (
                         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -329,7 +329,7 @@ class Database:
 
             # Check and create captcha_config table if missing
             if not await self._table_exists(db, "captcha_config"):
-                print("  ✓ Creating missing table: captcha_config")
+                print("  [OK] Creating missing table: captcha_config")
                 await db.execute("""
                     CREATE TABLE captcha_config (
                         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -361,7 +361,7 @@ class Database:
 
             # Check and create plugin_config table if missing
             if not await self._table_exists(db, "plugin_config"):
-                print("  ✓ Creating missing table: plugin_config")
+                print("  [OK] Creating missing table: plugin_config")
                 await db.execute("""
                     CREATE TABLE plugin_config (
                         id INTEGER PRIMARY KEY DEFAULT 1,
@@ -395,18 +395,18 @@ class Database:
                     if not await self._column_exists(db, "tokens", col_name):
                         try:
                             await db.execute(f"ALTER TABLE tokens ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to tokens table")
+                            print(f"  [OK] Added column '{col_name}' to tokens table")
                         except Exception as e:
-                            print(f"  ✗ Failed to add column '{col_name}': {e}")
+                            print(f"  [ERROR] Failed to add column '{col_name}': {e}")
 
             # Check and add missing columns to admin_config table
             if await self._table_exists(db, "admin_config"):
                 if not await self._column_exists(db, "admin_config", "error_ban_threshold"):
                     try:
                         await db.execute("ALTER TABLE admin_config ADD COLUMN error_ban_threshold INTEGER DEFAULT 3")
-                        print("  ✓ Added column 'error_ban_threshold' to admin_config table")
+                        print("  [OK] Added column 'error_ban_threshold' to admin_config table")
                     except Exception as e:
-                        print(f"  ✗ Failed to add column 'error_ban_threshold': {e}")
+                        print(f"  [ERROR] Failed to add column 'error_ban_threshold': {e}")
 
             # Check and add missing columns to proxy_config table
             if await self._table_exists(db, "proxy_config"):
@@ -419,9 +419,9 @@ class Database:
                     if not await self._column_exists(db, "proxy_config", col_name):
                         try:
                             await db.execute(f"ALTER TABLE proxy_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to proxy_config table")
+                            print(f"  [OK] Added column '{col_name}' to proxy_config table")
                         except Exception as e:
-                            print(f"  ✗ Failed to add column '{col_name}': {e}")
+                            print(f"  [ERROR] Failed to add column '{col_name}': {e}")
 
             # Check and add missing columns to captcha_config table
             if await self._table_exists(db, "captcha_config"):
@@ -449,9 +449,9 @@ class Database:
                     if not await self._column_exists(db, "captcha_config", col_name):
                         try:
                             await db.execute(f"ALTER TABLE captcha_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to captcha_config table")
+                            print(f"  [OK] Added column '{col_name}' to captcha_config table")
                         except Exception as e:
-                            print(f"  ✗ Failed to add column '{col_name}': {e}")
+                            print(f"  [ERROR] Failed to add column '{col_name}': {e}")
 
             # Check and add missing columns to token_stats table
             if await self._table_exists(db, "token_stats"):
@@ -467,9 +467,9 @@ class Database:
                     if not await self._column_exists(db, "token_stats", col_name):
                         try:
                             await db.execute(f"ALTER TABLE token_stats ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to token_stats table")
+                            print(f"  [OK] Added column '{col_name}' to token_stats table")
                         except Exception as e:
-                            print(f"  ✗ Failed to add column '{col_name}': {e}")
+                            print(f"  [ERROR] Failed to add column '{col_name}': {e}")
 
             # Check and add missing columns to plugin_config table
             if await self._table_exists(db, "plugin_config"):
@@ -481,9 +481,9 @@ class Database:
                     if not await self._column_exists(db, "plugin_config", col_name):
                         try:
                             await db.execute(f"ALTER TABLE plugin_config ADD COLUMN {col_name} {col_type}")
-                            print(f"  ✓ Added column '{col_name}' to plugin_config table")
+                            print(f"  [OK] Added column '{col_name}' to plugin_config table")
                         except Exception as e:
-                            print(f"  ✗ Failed to add column '{col_name}': {e}")
+                            print(f"  [ERROR] Failed to add column '{col_name}': {e}")
 
             # ========== Step 3: Ensure all config tables have default rows ==========
             # Note: This will NOT overwrite existing config rows

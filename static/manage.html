@@ -47,6 +47,7 @@
                 <button onclick="switchTab('tokens')" id="tabTokens" class="tab-btn border-b-2 border-primary text-sm font-medium py-3 px-1">Token 管理</button>
                 <button onclick="switchTab('settings')" id="tabSettings" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">系统配置</button>
                 <button onclick="switchTab('logs')" id="tabLogs" class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">请求日志</button>
+                <a href="/playground" id="tabPlayground" class="tab-btn inline-flex items-center border-b-2 border-transparent text-sm font-medium py-3 px-1 text-muted-foreground hover:text-foreground">接口测试</a>
             </nav>
         </div>
 
@@ -504,7 +505,8 @@
                             </div>
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-2 mt-4">
+                    <div class="grid grid-cols-3 gap-2 mt-4">
+                        <a href="/diagnostics" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-4 text-sm">打开诊断页</a>
                         <button id="btnTestCaptchaScore" onclick="testCaptchaScore()" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-4">测试当前打码分数</button>
                         <button onclick="saveCaptchaConfig()" class="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">保存配置</button>
                     </div>
@@ -539,6 +541,12 @@
                 <div class="flex items-center justify-between gap-4 p-4 border-b border-border">
                     <h3 class="text-lg font-semibold">请求日志</h3>
                     <div class="flex gap-2">
+                        <a href="/playground" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-sm" title="打开接口测试页">
+                            接口测试
+                        </a>
+                        <a href="/diagnostics" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-sm" title="打开打码诊断页">
+                            打码诊断
+                        </a>
                         <button onclick="clearAllLogs()" class="inline-flex items-center justify-center rounded-md transition-colors hover:bg-red-50 hover:text-red-700 h-8 px-3 text-sm" title="清空日志">
                             <svg class="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
